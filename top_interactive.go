@@ -306,6 +306,35 @@ func coloredBar(n, total, width int, enabled bool) string {
 }
 
 // Width-aware padding/clipping of ANSI SGR text: escape codes have zero width.
+func cropANSI(s string, offset, width int) string {
+	var out strings.Builder
+	cells, written := 0, 0
+	for i := 0; i < len(s) && written < width; {
+		if s[i] == 27 && i+1 < len(s) && s[i+1] == '[' {
+			end := strings.IndexByte(s[i:], 'm')
+			if end >= 0 {
+				if cells >= offset {
+					out.WriteString(s[i : i+end+1])
+				}
+				i += end + 1
+				continue
+			}
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		i += size
+		if cells >= offset {
+			out.WriteRune(r)
+			written++
+		}
+		cells++
+	}
+	if written < width {
+		out.WriteString(strings.Repeat(" ", width-written))
+	}
+	out.WriteString("\x1b[0m")
+	return out.String()
+}
+
 func fitANSI(s string, width int) string {
 	var out strings.Builder
 	cells := 0
@@ -385,6 +414,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	user, by, asc, selected, scroll, message := "", initialSort, false, 0, 0, ""
+	hScroll, tableWidth := 0, 0
 	headerFocused, selectedHeader, headerActivated := false, 0, false
 	width, height, headerY, rows := 80, 24, 5, 1
 	ids := []string{}
@@ -410,6 +440,15 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 		}
 		headers, items, rowIDs, currentColumns := topRows(s, user, by, asc, colorBars)
 		ids, columns = rowIDs, currentColumns
+		tableWidth = utf8.RuneCountInString(sgrPattern.ReplaceAllString(headers[0], ""))
+		for _, item := range items {
+			tableWidth = max(tableWidth, utf8.RuneCountInString(sgrPattern.ReplaceAllString(item, "")))
+		}
+		if user == "" {
+			hScroll = 0
+		} else {
+			hScroll = min(hScroll, max(0, tableWidth-(width-1)))
+		}
 		if selectedHeader >= len(columns) {
 			selectedHeader = len(columns) - 1
 		}
@@ -450,14 +489,14 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 		header := headers[0]
 		if headerFocused {
 			header = highlightHeader(header, columns[selectedHeader])
-			fmt.Fprint(&b, fitANSI(header, width-1), "\r\n")
-		} else {
-			fmt.Fprint(&b, fit(header, width-1), "\r\n")
 		}
+		offset := 0
+		if user != "" {
+			offset = hScroll
+		}
+		fmt.Fprint(&b, cropANSI(header, offset, width-1), "\r\n")
 		for i := scroll; i < len(items) && i < scroll+rows; i++ {
-			// Job progress bars contain ANSI color codes; pad by terminal cells,
-			// not bytes, so they do not truncate the rest of a selected row.
-			line := fitANSI(items[i], width-1)
+			line := cropANSI(items[i], offset, width-1)
 			if !headerFocused && i == selected {
 				line = "\x1b[7m" + line + "\x1b[0m"
 			}
@@ -465,7 +504,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 		}
 		footer := "↑ header/rows  ←/→ header columns  Enter sort  → jobs  ← users  click header sort  q quit"
 		if user != "" {
-			footer = "Jobs: " + user + "  ↑ header/rows  ←/→ header columns  Enter sort  ← users  q quit"
+			footer = "Jobs: " + user + "  ↑ header/rows  ←/→ scroll table (← users at left edge)  Enter sort  q quit"
 		}
 		if message != "" {
 			footer += "  " + message
@@ -520,8 +559,9 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					user = ids[selected]
 					by = "id"
 					asc = false
-					selected = 0
-					scroll = 0
+					selected, scroll, hScroll = 0, 0, 0
+				} else if user != "" {
+					hScroll = min(hScroll+max(1, (width-1)/2), max(0, tableWidth-(width-1)))
 				}
 			case "\r", "\n":
 				if headerFocused {
@@ -543,16 +583,15 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					scroll = 0
 				}
 			case "left":
-				if headerFocused {
-					if selectedHeader > 0 {
-						selectedHeader--
-						headerActivated = false
-					}
+				if headerFocused && selectedHeader > 0 {
+					selectedHeader--
+					headerActivated = false
+				} else if user != "" && hScroll > 0 {
+					hScroll = max(0, hScroll-max(1, (width-1)/2))
 				} else if user != "" {
 					user = ""
 					by = initialSort
-					selected = 0
-					scroll = 0
+					selected, scroll, hScroll = 0, 0, 0
 				}
 			case "g", "c", "m", "u":
 				if user == "" {
@@ -575,8 +614,9 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 			case "click":
 				if ev.y == headerY {
 					field := ""
+					x := ev.x + hScroll
 					for _, column := range columns {
-						if ev.x >= column.start && ev.x <= column.end {
+						if x >= column.start && x <= column.end {
 							field = column.field
 							break
 						}
