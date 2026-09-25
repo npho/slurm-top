@@ -32,6 +32,9 @@ func TestQueueAggregation(t *testing.T) {
 	if s.Users[1].MemoryMB != 512 {
 		t.Fatalf("plain MiB: %+v", s.Users[1])
 	}
+	if title := topLines(s, "gpu", 0)[0]; !strings.Contains(title, "2 users / 2 running / 1 pending") {
+		t.Fatalf("title: %q", title)
+	}
 	if len(s.Jobs) != 3 || s.Jobs[0].ID != 42 || s.Jobs[0].Account != "research" || s.Jobs[0].QoS != "normal" || s.Jobs[0].Progress != 0 {
 		t.Fatalf("jobs: %+v", s.Jobs)
 	}
