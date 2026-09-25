@@ -65,7 +65,7 @@ func TestTypesAndJobSorting(t *testing.T) {
 	if jobs[0].Account != "b" {
 		t.Fatal(jobs)
 	}
-	_, lines, ids := topRows(s, "a", "id", false)
+	_, lines, ids, _ := topRows(s, "a", "id", false)
 	if len(lines) != 2 || ids[0] != "2/RUNNING" || !strings.Contains(lines[0], "z") {
 		t.Fatalf("rows %v %v", lines, ids)
 	}

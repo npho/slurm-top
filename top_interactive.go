@@ -146,7 +146,48 @@ func progressBar(percent, width int, color bool) string {
 	return "\x1b[32m" + strings.Repeat("█", full) + partial + "\x1b[39m" + strings.Repeat("░", empty)
 }
 
-func topRows(s Snapshot, user, by string, asc bool, color ...bool) ([]string, []string, []string) {
+type tableColumn struct {
+	field string
+	label string
+}
+
+func renderTable(columns []tableColumn, rows [][]string, by string, asc bool) (string, []string, []headerColumn) {
+	widths := make([]int, len(columns))
+	for i, column := range columns {
+		widths[i] = utf8.RuneCountInString(column.label)
+		if sortArrow(column.field, by, asc) != "" {
+			widths[i] += 2
+		}
+	}
+	for _, row := range rows {
+		for i, value := range row {
+			widths[i] = max(widths[i], utf8.RuneCountInString(sgrPattern.ReplaceAllString(value, "")))
+		}
+	}
+	headerParts := make([]string, len(columns))
+	headerColumns := make([]headerColumn, len(columns))
+	start := 1
+	for i, column := range columns {
+		headerParts[i] = leftHeader(column.label, column.field, by, asc, widths[i])
+		headerColumns[i] = headerColumn{column.field, start, start + widths[i] - 1}
+		start += widths[i] + 1
+	}
+	lines := make([]string, len(rows))
+	for i, row := range rows {
+		parts := make([]string, len(row))
+		for j, value := range row {
+			if strings.Contains(value, "\x1b[") {
+				parts[j] = fitANSI(value, widths[j])
+			} else {
+				parts[j] = value + strings.Repeat(" ", widths[j]-utf8.RuneCountInString(value))
+			}
+		}
+		lines[i] = strings.Join(parts, " ")
+	}
+	return strings.Join(headerParts, " "), lines, headerColumns
+}
+
+func topRows(s Snapshot, user, by string, asc bool, color ...bool) ([]string, []string, []string, []headerColumn) {
 	colorEnabled := len(color) > 0 && color[0]
 	if user == "" {
 		users := append([]Usage(nil), s.Users...)
@@ -156,13 +197,15 @@ func topRows(s Snapshot, user, by string, asc bool, color ...bool) ([]string, []
 				users[i], users[j] = users[j], users[i]
 			}
 		}
-		lines := make([]string, 0, len(users))
+		columns := []tableColumn{{"user", "USER"}, {"jobs", "RUN"}, {"gpu", "GPU"}, {"cpu", "CPU"}, {"cpu-gpu", "C:G"}, {"mem", "MEM"}, {"memory-cpu", "M:C"}, {"pending-jobs", "PEND"}, {"pending-gpu", "GPU"}, {"pending-cpu", "CPU"}, {"pending-cpu-gpu", "C:G"}, {"pending-mem", "MEM"}, {"pending-memory-cpu", "M:C"}}
+		rows := make([][]string, 0, len(users))
 		ids := make([]string, 0, len(users))
 		for _, u := range users {
 			ids = append(ids, u.User)
-			lines = append(lines, fmt.Sprintf("%-16.16s %6d %6d %6d %6s %6s %6s  %6d %6d %6d %6s %6s %6s", u.User, u.RunningJobs, u.GPUs, u.CPUs, cpuGPU(u.CPUs, u.GPUs), gb(u.MemoryMB), memoryCPU(u.MemoryMB, u.CPUs), u.PendingJobs, u.PendingGPUs, u.PendingCPUs, cpuGPU(u.PendingCPUs, u.PendingGPUs), gb(u.PendingMemoryMB), memoryCPU(u.PendingMemoryMB, u.PendingCPUs)))
+			rows = append(rows, []string{u.User, strconv.Itoa(u.RunningJobs), strconv.Itoa(u.GPUs), strconv.Itoa(u.CPUs), cpuGPU(u.CPUs, u.GPUs), gb(u.MemoryMB), memoryCPU(u.MemoryMB, u.CPUs), strconv.Itoa(u.PendingJobs), strconv.Itoa(u.PendingGPUs), strconv.Itoa(u.PendingCPUs), cpuGPU(u.PendingCPUs, u.PendingGPUs), gb(u.PendingMemoryMB), memoryCPU(u.PendingMemoryMB, u.PendingCPUs)})
 		}
-		return []string{userHeader(by, asc)}, lines, ids
+		header, lines, headerColumns := renderTable(columns, rows, by, asc)
+		return []string{header}, lines, ids, headerColumns
 	}
 	jobs := []Job{}
 	for _, j := range s.Jobs {
@@ -171,25 +214,15 @@ func topRows(s Snapshot, user, by string, asc bool, color ...bool) ([]string, []
 		}
 	}
 	sortJobs(jobs, by, asc)
-	lines := make([]string, 0, len(jobs))
+	columns := []tableColumn{{"id", "JOB ID"}, {"account", "ACCOUNT"}, {"qos", "QOS"}, {"progress", "PROGRESS"}, {"gpu", "GPU"}, {"cpu", "CPU"}, {"cpu-gpu", "C:G"}, {"mem", "MEM"}, {"memory-cpu", "M:C"}, {"name", "NAME"}}
+	rows := make([][]string, 0, len(jobs))
 	ids := make([]string, 0, len(jobs))
 	for _, j := range jobs {
 		ids = append(ids, strconv.Itoa(j.ID)+"/"+j.State)
-		lines = append(lines, fmt.Sprintf("%-11d %-14.14s %-10.10s %-10s %8d %8d %8s %10s %10s  %s", j.ID, j.Account, j.QoS, progressBar(j.Progress, 10, colorEnabled), j.GPUs, j.CPUs, cpuGPU(j.CPUs, j.GPUs), gb(j.MemoryMB), memoryCPU(j.MemoryMB, j.CPUs), j.Name))
+		rows = append(rows, []string{strconv.Itoa(j.ID), j.Account, j.QoS, progressBar(j.Progress, 10, colorEnabled), strconv.Itoa(j.GPUs), strconv.Itoa(j.CPUs), cpuGPU(j.CPUs, j.GPUs), gb(j.MemoryMB), memoryCPU(j.MemoryMB, j.CPUs), j.Name})
 	}
-	header := strings.Join([]string{
-		leftHeader("JOB ID", "id", by, asc, 11),
-		leftHeader("ACCOUNT", "account", by, asc, 14),
-		leftHeader("QOS", "qos", by, asc, 10),
-		leftHeader("PROGRESS", "progress", by, asc, 10),
-		leftHeader("GPU", "gpu", by, asc, 8),
-		leftHeader("CPU", "cpu", by, asc, 8),
-		leftHeader("C:G", "cpu-gpu", by, asc, 8),
-		leftHeader("MEM", "mem", by, asc, 10),
-		leftHeader("M:C", "memory-cpu", by, asc, 10),
-		leftHeader("NAME", "name", by, asc, 20),
-	}, " ")
-	return []string{header}, lines, ids
+	header, lines, headerColumns := renderTable(columns, rows, by, asc)
+	return []string{header}, lines, ids, headerColumns
 }
 
 type headerColumn struct {
@@ -354,9 +387,10 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	user, by, asc, selected, scroll, message := "", initialSort, false, 0, 0, ""
-	headerFocused, headerColumn, headerActivated := false, 0, false
+	headerFocused, selectedHeader, headerActivated := false, 0, false
 	width, height, headerY, rows := 80, 24, 5, 1
 	ids := []string{}
+	columns := []headerColumn{}
 	draw := func() error {
 		w, h, e := term.GetSize(int(out.Fd()))
 		if e != nil || w < 1 || h < 1 {
@@ -376,14 +410,13 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 		if rows < 1 {
 			rows = 1
 		}
-		headers, items, rowIDs := topRows(s, user, by, asc, colorBars)
-		ids = rowIDs
-		columns := headerColumns(user)
-		if headerColumn >= len(columns) {
-			headerColumn = len(columns) - 1
+		headers, items, rowIDs, currentColumns := topRows(s, user, by, asc, colorBars)
+		ids, columns = rowIDs, currentColumns
+		if selectedHeader >= len(columns) {
+			selectedHeader = len(columns) - 1
 		}
-		if headerColumn < 0 {
-			headerColumn = 0
+		if selectedHeader < 0 {
+			selectedHeader = 0
 		}
 		if len(items) == 0 {
 			selected, scroll = 0, 0
@@ -418,7 +451,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 		fmt.Fprint(&b, "\r\n")
 		header := headers[0]
 		if headerFocused {
-			header = highlightHeader(header, columns[headerColumn])
+			header = highlightHeader(header, columns[selectedHeader])
 			fmt.Fprint(&b, fitANSI(header, width-1), "\r\n")
 		} else {
 			fmt.Fprint(&b, fit(header, width-1), "\r\n")
@@ -481,8 +514,8 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				}
 			case "right":
 				if headerFocused {
-					if headerColumn < len(headerColumns(user))-1 {
-						headerColumn++
+					if selectedHeader < len(columns)-1 {
+						selectedHeader++
 						headerActivated = false
 					}
 				} else if user == "" && selected < len(ids) {
@@ -494,7 +527,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				}
 			case "\r", "\n":
 				if headerFocused {
-					field := headerColumns(user)[headerColumn].field
+					field := columns[selectedHeader].field
 					if headerActivated && field == by {
 						asc = !asc
 					} else {
@@ -513,8 +546,8 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				}
 			case "left":
 				if headerFocused {
-					if headerColumn > 0 {
-						headerColumn--
+					if selectedHeader > 0 {
+						selectedHeader--
 						headerActivated = false
 					}
 				} else if user != "" {
@@ -543,11 +576,17 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				}
 			case "click":
 				if ev.y == headerY {
-					field := headerSort(ev.x, user)
+					field := ""
+					for _, column := range columns {
+						if ev.x >= column.start && ev.x <= column.end {
+							field = column.field
+							break
+						}
+					}
 					if field != "" {
-						for i, column := range headerColumns(user) {
+						for i, column := range columns {
 							if column.field == field {
-								headerColumn = i
+								selectedHeader = i
 								break
 							}
 						}
@@ -597,7 +636,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 			} else {
 				s = updated
 				message = ""
-				_, _, next := topRows(s, user, by, asc)
+				_, _, next, _ := topRows(s, user, by, asc)
 				for i, item := range next {
 					if item == id {
 						selected = i
