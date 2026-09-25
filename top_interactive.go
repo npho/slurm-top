@@ -150,13 +150,13 @@ func topRows(s Snapshot, user, by string, asc bool) ([]string, []string, []strin
 		lines = append(lines, fmt.Sprintf("%-11d %-14.14s %-8s %8d %8d %10s  %s", j.ID, j.Account, j.State, j.CPUs, j.GPUs, gb(j.MemoryMB), j.Name))
 	}
 	header := strings.Join([]string{
-		centeredHeader("JOB ID", "id", by, asc, 11),
-		centeredHeader("ACCOUNT", "account", by, asc, 14),
-		centeredHeader("STATE", "state", by, asc, 8),
-		centeredHeader("CPU", "cpu", by, asc, 8),
-		centeredHeader("GPU", "gpu", by, asc, 8),
-		centeredHeader("MEM", "mem", by, asc, 10),
-		centeredHeader("NAME", "name", by, asc, 20),
+		leftHeader("JOB ID", "id", by, asc, 11),
+		leftHeader("ACCOUNT", "account", by, asc, 14),
+		leftHeader("STATE", "state", by, asc, 8),
+		leftHeader("CPU", "cpu", by, asc, 8),
+		leftHeader("GPU", "gpu", by, asc, 8),
+		leftHeader("MEM", "mem", by, asc, 10),
+		leftHeader("NAME", "name", by, asc, 20),
 	}, " ")
 	return []string{header}, lines, ids
 }

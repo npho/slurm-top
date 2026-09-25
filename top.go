@@ -238,7 +238,7 @@ func sortArrow(field, by string, asc bool) string {
 	return "↓"
 }
 
-func centeredHeader(label, field, by string, asc bool, width int) string {
+func leftHeader(label, field, by string, asc bool, width int) string {
 	if arrow := sortArrow(field, by, asc); arrow != "" {
 		label += " " + arrow
 	}
@@ -246,21 +246,21 @@ func centeredHeader(label, field, by string, asc bool, width int) string {
 	if padding <= 0 {
 		return label
 	}
-	return strings.Repeat(" ", padding/2) + label + strings.Repeat(" ", padding-padding/2)
+	return label + strings.Repeat(" ", padding)
 }
 
 func userHeader(by string, asc bool) string {
 	return strings.Join([]string{
-		centeredHeader("USER", "user", by, asc, 16),
-		centeredHeader("JOBS", "jobs", by, asc, 6),
-		centeredHeader("CPU", "cpu", by, asc, 6),
-		centeredHeader("MEM", "mem", by, asc, 6),
-		centeredHeader("GPU", "gpu", by, asc, 6),
+		leftHeader("USER", "user", by, asc, 16),
+		leftHeader("JOBS", "jobs", by, asc, 6),
+		leftHeader("CPU", "cpu", by, asc, 6),
+		leftHeader("MEM", "mem", by, asc, 6),
+		leftHeader("GPU", "gpu", by, asc, 6),
 		" ",
-		centeredHeader("JOBS", "pending-jobs", by, asc, 6),
-		centeredHeader("CPU", "pending-cpu", by, asc, 6),
-		centeredHeader("MEM", "pending-mem", by, asc, 6),
-		centeredHeader("GPU", "pending-gpu", by, asc, 6),
+		leftHeader("JOBS", "pending-jobs", by, asc, 6),
+		leftHeader("CPU", "pending-cpu", by, asc, 6),
+		leftHeader("MEM", "pending-mem", by, asc, 6),
+		leftHeader("GPU", "pending-gpu", by, asc, 6),
 	}, " ")
 }
 func collectTop(ctx context.Context) (Snapshot, error) {
