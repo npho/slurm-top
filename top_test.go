@@ -90,8 +90,12 @@ func TestJobProgressAndBar(t *testing.T) {
 	if got := jobProgress([]string{"PENDING"}, start, end, time.Unix(150, 0)); got != 0 {
 		t.Fatalf("pending progress = %d, want 0", got)
 	}
-	if got := progressBar(50, 10, true); got != "\x1b[32m█████\x1b[0m░░░░░" {
+	if got := progressBar(50, 10, true); got != "\x1b[32m█████\x1b[39m░░░░░" {
 		t.Fatalf("bar = %q", got)
+	}
+	selected := "\x1b[7m" + fitANSI(progressBar(50, 10, true)+"  remainder", 30) + "\x1b[0m"
+	if !strings.Contains(selected, "remainder") || strings.Contains(selected, "\x1b[0m░") {
+		t.Fatalf("selected progress row = %q", selected)
 	}
 }
 

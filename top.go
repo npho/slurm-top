@@ -319,7 +319,7 @@ func topLines(s Snapshot, by string, width int) []string {
 		fmt.Sprintf("slurm-top  %s    %d running / %d pending jobs", s.UpdatedAt.Format("15:04:05"), s.RunningJobs, s.PendingJobs),
 		fmt.Sprintf("GPU allocated  %s %d/%d", percentBar(g, s.CapacityGPU, 20), g, s.CapacityGPU),
 		fmt.Sprintf("CPU allocated  %s %d/%d", percentBar(c, s.CapacityCPU, 20), c, s.CapacityCPU),
-		fmt.Sprintf("MEM allocated  %s %s TB/%s TB", percentBar(m, s.CapacityMemoryMB, 20), tb(m), tb(s.CapacityMemoryMB)),
+		fmt.Sprintf("MEM allocated  %s %s/%s TB", percentBar(m, s.CapacityMemoryMB, 20), tb(m), tb(s.CapacityMemoryMB)),
 		"Bars = allocations / cluster capacity. Not measured utilization.",
 		userHeader(by, false),
 	}

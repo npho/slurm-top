@@ -127,7 +127,8 @@ func progressBar(percent, width int, color bool) string {
 		return plain
 	}
 	filled := (min(100, percent)*width + 50) / 100
-	return "\x1b[32m" + strings.Repeat("█", filled) + "\x1b[0m" + strings.Repeat("░", width-filled)
+	// Restore the default foreground without clearing a selected row's reverse-video background.
+	return "\x1b[32m" + strings.Repeat("█", filled) + "\x1b[39m" + strings.Repeat("░", width-filled)
 }
 
 func topRows(s Snapshot, user, by string, asc bool, color ...bool) ([]string, []string, []string) {
@@ -292,7 +293,7 @@ func horizontalBars(s Snapshot, width int, colored ...bool) []string {
 		return fmt.Sprintf("%s %s %d/%d", label, coloredBar(n, total, 8, enabled), n, total)
 	}
 	c := segment("CPU", cpu, s.CapacityCPU)
-	m := fmt.Sprintf("MEM %s %s TB/%s TB", coloredBar(mem, s.CapacityMemoryMB, 8, enabled), tb(mem), tb(s.CapacityMemoryMB))
+	m := fmt.Sprintf("MEM %s %s/%s TB", coloredBar(mem, s.CapacityMemoryMB, 8, enabled), tb(mem), tb(s.CapacityMemoryMB))
 	h := segment("H200", s.H200Allocated, s.H200Capacity)
 	mig := segment("H200-MIG", s.MIGAllocated, s.MIGCapacity)
 	visible := func(v string) int { return utf8.RuneCountInString(sgrPattern.ReplaceAllString(v, "")) }
@@ -404,7 +405,9 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 			fmt.Fprint(&b, fit(header, width-1), "\r\n")
 		}
 		for i := scroll; i < len(items) && i < scroll+rows; i++ {
-			line := fit(items[i], width-1)
+			// Job progress bars contain ANSI color codes; pad by terminal cells,
+			// not bytes, so they do not truncate the rest of a selected row.
+			line := fitANSI(items[i], width-1)
 			if !headerFocused && i == selected {
 				line = "\x1b[7m" + line + "\x1b[0m"
 			}
