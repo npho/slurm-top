@@ -1,0 +1,12 @@
+# Local build output
+/slurm-top
+
+# Go test and profiling artifacts
+*.test
+*.prof
+coverage.out
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
