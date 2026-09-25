@@ -189,10 +189,27 @@ func headerSort(x int, user string) string {
 	return ""
 }
 
+// headerByteOffset converts a terminal-cell offset to a byte offset. Headers
+// include Unicode sort arrows, so byte indexes would shift later columns.
+func headerByteOffset(header string, cells int) int {
+	if cells <= 0 {
+		return 0
+	}
+	for i := 0; i < len(header) && cells > 0; {
+		_, size := utf8.DecodeRuneInString(header[i:])
+		i += size
+		cells--
+		if cells == 0 {
+			return i
+		}
+	}
+	return len(header)
+}
+
 func highlightHeader(header string, column headerColumn) string {
-	start := column.start - 1
-	end := min(column.end, len(header))
-	if start < 0 || start >= end {
+	start := headerByteOffset(header, column.start-1)
+	end := headerByteOffset(header, column.end)
+	if start >= end {
 		return header
 	}
 	return header[:start] + "\x1b[7m" + header[start:end] + "\x1b[0m" + header[end:]
