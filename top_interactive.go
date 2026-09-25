@@ -182,7 +182,12 @@ func renderTable(columns []tableColumn, rows [][]string, by string, asc bool) (s
 			// Do not reset ANSI state between cells: a reset here would cancel
 			// the reverse-video background of a selected row after its progress bar.
 			visible := utf8.RuneCountInString(sgrPattern.ReplaceAllString(value, ""))
-			parts[j] = value + strings.Repeat(" ", widths[j]-visible)
+			padding := strings.Repeat(" ", widths[j]-visible)
+			if columns[j].field == "elapsed" {
+				parts[j] = padding + value
+			} else {
+				parts[j] = value + padding
+			}
 		}
 		lines[i] = strings.Join(parts, "  ")
 	}
@@ -561,7 +566,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					}
 				} else if user == "" && selected < len(ids) {
 					user = ids[selected]
-					by = "id"
+					by = "elapsed"
 					asc = false
 					selected, scroll, hScroll = 0, 0, 0
 				} else if user != "" {
@@ -581,7 +586,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					scroll = 0
 				} else if user == "" && selected < len(ids) {
 					user = ids[selected]
-					by = "id"
+					by = "elapsed"
 					asc = false
 					selected = 0
 					scroll = 0
