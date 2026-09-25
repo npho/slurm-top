@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 type jobRecord struct {
@@ -199,28 +200,68 @@ func gpuTypeCounts(tres string, h200, mig, other *int) {
 func sortUsers(users []Usage, by string) {
 	sort.Slice(users, func(i, j int) bool {
 		a, b := users[i], users[j]
+		var left, right int
 		switch by {
 		case "cpu":
-			if a.CPUs != b.CPUs {
-				return a.CPUs > b.CPUs
-			}
+			left, right = a.CPUs, b.CPUs
 		case "mem":
-			if a.MemoryMB != b.MemoryMB {
-				return a.MemoryMB > b.MemoryMB
-			}
+			left, right = a.MemoryMB, b.MemoryMB
 		case "jobs":
-			if a.RunningJobs != b.RunningJobs {
-				return a.RunningJobs > b.RunningJobs
-			}
+			left, right = a.RunningJobs, b.RunningJobs
+		case "pending-cpu":
+			left, right = a.PendingCPUs, b.PendingCPUs
+		case "pending-mem":
+			left, right = a.PendingMemoryMB, b.PendingMemoryMB
+		case "pending-gpu":
+			left, right = a.PendingGPUs, b.PendingGPUs
+		case "pending-jobs":
+			left, right = a.PendingJobs, b.PendingJobs
 		case "user":
 			return a.User < b.User
 		default:
-			if a.GPUs != b.GPUs {
-				return a.GPUs > b.GPUs
-			}
+			left, right = a.GPUs, b.GPUs
+		}
+		if left != right {
+			return left > right
 		}
 		return a.User < b.User
 	})
+}
+
+func sortArrow(field, by string, asc bool) string {
+	if field != by {
+		return ""
+	}
+	if asc {
+		return "↑"
+	}
+	return "↓"
+}
+
+func centeredHeader(label, field, by string, asc bool, width int) string {
+	if arrow := sortArrow(field, by, asc); arrow != "" {
+		label += " " + arrow
+	}
+	padding := width - utf8.RuneCountInString(label)
+	if padding <= 0 {
+		return label
+	}
+	return strings.Repeat(" ", padding/2) + label + strings.Repeat(" ", padding-padding/2)
+}
+
+func userHeader(by string, asc bool) string {
+	return strings.Join([]string{
+		centeredHeader("USER", "user", by, asc, 16),
+		centeredHeader("JOBS", "jobs", by, asc, 6),
+		centeredHeader("CPU", "cpu", by, asc, 6),
+		centeredHeader("MEM", "mem", by, asc, 6),
+		centeredHeader("GPU", "gpu", by, asc, 6),
+		" ",
+		centeredHeader("JOBS", "pending-jobs", by, asc, 6),
+		centeredHeader("CPU", "pending-cpu", by, asc, 6),
+		centeredHeader("MEM", "pending-mem", by, asc, 6),
+		centeredHeader("GPU", "pending-gpu", by, asc, 6),
+	}, " ")
 }
 func collectTop(ctx context.Context) (Snapshot, error) {
 	// Sequential calls avoid doubling controller load when many people use watch.
@@ -258,20 +299,11 @@ func topLines(s Snapshot, by string, width int) []string {
 		fmt.Sprintf("GPU allocated  %s %d/%d", percentBar(g, s.CapacityGPU, 20), g, s.CapacityGPU),
 		fmt.Sprintf("CPU allocated  %s %d/%d", percentBar(c, s.CapacityCPU, 20), c, s.CapacityCPU),
 		fmt.Sprintf("MEM allocated  %s %s/%s GB", percentBar(m, s.CapacityMemoryMB, 20), gb(m), gb(s.CapacityMemoryMB)),
-		"Bars = allocations / cluster capacity; SHARE* = selected resource share (GPU for jobs/user). Not measured utilization.",
-		"USER             JOBS R/P  CPU alloc  GPU alloc   MEM GB  SHARE*        PENDING CPU/GPU/MEM GB",
+		"Bars = allocations / cluster capacity. Not measured utilization.",
+		userHeader(by, false),
 	}
 	for _, u := range users {
-		value, capacity := u.GPUs, s.CapacityGPU
-		switch by {
-		case "cpu":
-			value, capacity = u.CPUs, s.CapacityCPU
-		case "mem":
-			value, capacity = u.MemoryMB, s.CapacityMemoryMB
-		case "jobs", "user":
-			value, capacity = u.GPUs, s.CapacityGPU
-		}
-		lines = append(lines, fmt.Sprintf("%-16.16s %4d/%-4d %9d %10d %8s  %s   %d/%d/%s", u.User, u.RunningJobs, u.PendingJobs, u.CPUs, u.GPUs, gb(u.MemoryMB), percentBar(value, capacity, 10), u.PendingCPUs, u.PendingGPUs, gb(u.PendingMemoryMB)))
+		lines = append(lines, fmt.Sprintf("%-16.16s %6d %6d %6s %6d  %6d %6d %6s %6d", u.User, u.RunningJobs, u.CPUs, gb(u.MemoryMB), u.GPUs, u.PendingJobs, u.PendingCPUs, gb(u.PendingMemoryMB), u.PendingGPUs))
 	}
 	if len(users) == 0 {
 		lines = append(lines, "No running or pending jobs.")

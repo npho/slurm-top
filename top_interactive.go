@@ -132,9 +132,9 @@ func topRows(s Snapshot, user, by string, asc bool) ([]string, []string, []strin
 		ids := make([]string, 0, len(users))
 		for _, u := range users {
 			ids = append(ids, u.User)
-			lines = append(lines, fmt.Sprintf("%-16.16s %4d/%-4d %9d %9d %11s  %d/%d/%s", u.User, u.RunningJobs, u.PendingJobs, u.CPUs, u.GPUs, gb(u.MemoryMB), u.PendingCPUs, u.PendingGPUs, gb(u.PendingMemoryMB)))
+			lines = append(lines, fmt.Sprintf("%-16.16s %6d %6d %6s %6d  %6d %6d %6s %6d", u.User, u.RunningJobs, u.CPUs, gb(u.MemoryMB), u.GPUs, u.PendingJobs, u.PendingCPUs, gb(u.PendingMemoryMB), u.PendingGPUs))
 		}
-		return []string{"USER            JOBS R/P  CPU alloc GPU alloc  MEM GB     PENDING CPU/GPU/MEM GB"}, lines, ids
+		return []string{userHeader(by, asc)}, lines, ids
 	}
 	jobs := []Job{}
 	for _, j := range s.Jobs {
@@ -149,7 +149,16 @@ func topRows(s Snapshot, user, by string, asc bool) ([]string, []string, []strin
 		ids = append(ids, strconv.Itoa(j.ID)+"/"+j.State)
 		lines = append(lines, fmt.Sprintf("%-11d %-14.14s %-8s %8d %8d %10s  %s", j.ID, j.Account, j.State, j.CPUs, j.GPUs, gb(j.MemoryMB), j.Name))
 	}
-	return []string{"JOB ID      ACCOUNT        STATE    CPU req  GPU req   MEM GB     NAME"}, lines, ids
+	header := strings.Join([]string{
+		centeredHeader("JOB ID", "id", by, asc, 11),
+		centeredHeader("ACCOUNT", "account", by, asc, 14),
+		centeredHeader("STATE", "state", by, asc, 8),
+		centeredHeader("CPU", "cpu", by, asc, 8),
+		centeredHeader("GPU", "gpu", by, asc, 8),
+		centeredHeader("MEM", "mem", by, asc, 10),
+		centeredHeader("NAME", "name", by, asc, 20),
+	}, " ")
+	return []string{header}, lines, ids
 }
 
 type headerColumn struct {
@@ -160,13 +169,14 @@ type headerColumn struct {
 func headerColumns(user string) []headerColumn {
 	if user == "" {
 		return []headerColumn{
-			{"user", 1, 16}, {"jobs", 17, 26}, {"cpu", 27, 36},
-			{"gpu", 37, 47}, {"mem", 48, 58},
+			{"user", 1, 16}, {"jobs", 18, 23}, {"cpu", 25, 30}, {"mem", 32, 37},
+			{"gpu", 39, 44}, {"pending-jobs", 48, 53}, {"pending-cpu", 55, 60},
+			{"pending-mem", 62, 67}, {"pending-gpu", 69, 74},
 		}
 	}
 	return []headerColumn{
-		{"id", 1, 12}, {"account", 13, 27}, {"state", 28, 36},
-		{"cpu", 37, 45}, {"gpu", 46, 55}, {"mem", 56, 66}, {"name", 67, 9999},
+		{"id", 1, 11}, {"account", 13, 26}, {"state", 28, 35},
+		{"cpu", 37, 44}, {"gpu", 46, 53}, {"mem", 55, 64}, {"name", 67, 9999},
 	}
 }
 
@@ -352,8 +362,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				fmt.Fprint(&b, fit(line, width-1), "\r\n")
 			}
 		}
-		note := "Allocated / configured capacity (not measured utilization). GPU MIG instances counted separately."
-		fmt.Fprint(&b, fit(note, width-1), "\r\n")
+		fmt.Fprint(&b, "\r\n")
 		header := headers[0]
 		if headerFocused {
 			header = highlightHeader(header, columns[headerColumn])

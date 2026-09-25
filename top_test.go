@@ -70,13 +70,25 @@ func TestTypesAndJobSorting(t *testing.T) {
 		t.Fatal("header columns")
 	}
 	userColumns, jobColumns := headerColumns(""), headerColumns("a")
-	if len(userColumns) != 5 || len(jobColumns) != 7 || jobColumns[6].field != "name" {
+	if len(userColumns) != 9 || len(jobColumns) != 7 || userColumns[5].field != "pending-jobs" || jobColumns[6].field != "name" {
 		t.Fatalf("columns: %v %v", userColumns, jobColumns)
 	}
-	if got := highlightHeader("USER            JOBS", userColumns[1]); got != "USER            \x1b[7mJOBS\x1b[0m" {
+	if got := highlightHeader(userHeader("gpu", false), userColumns[1]); !strings.Contains(got, "\x1b[7m JOBS \x1b[0m") {
 		t.Fatalf("highlight: %q", got)
 	}
 }
+func TestSortPendingUsersAndHeaderArrows(t *testing.T) {
+	users := []Usage{{User: "alice", PendingGPUs: 1}, {User: "bob", PendingGPUs: 3}}
+	sortUsers(users, "pending-gpu")
+	if users[0].User != "bob" {
+		t.Fatalf("pending GPU sort: %v", users)
+	}
+	header := userHeader("pending-gpu", false)
+	if !strings.Contains(header, "GPU ↓") {
+		t.Fatalf("missing sort arrow: %q", header)
+	}
+}
+
 func TestMouseAndArrows(t *testing.T) {
 	in, out, e := os.Pipe()
 	if e != nil {
