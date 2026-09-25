@@ -105,6 +105,8 @@ func sortJobs(jobs []Job, by string, asc bool) {
 			cmp = strings.Compare(a.Partition, b.Partition)
 		case "progress":
 			cmp = a.Progress - b.Progress
+		case "elapsed":
+			cmp = a.ElapsedMinutes - b.ElapsedMinutes
 		case "cpu-gpu":
 			left, right := ratioSortValue(a.CPUs, a.GPUs), ratioSortValue(b.CPUs, b.GPUs)
 			if left < right {
@@ -214,12 +216,12 @@ func topRows(s Snapshot, user, by string, asc bool, color ...bool) ([]string, []
 		}
 	}
 	sortJobs(jobs, by, asc)
-	columns := []tableColumn{{"id", "JOB ID"}, {"account", "ACCOUNT"}, {"qos", "QOS"}, {"progress", "PROGRESS"}, {"partition", "PARTITION"}, {"gpu", "GPU"}, {"cpu", "CPU"}, {"cpu-gpu", "C:G"}, {"mem", "MEM"}, {"memory-cpu", "M:C"}, {"name", "NAME"}}
+	columns := []tableColumn{{"id", "JOB ID"}, {"account", "ACCOUNT"}, {"qos", "QOS"}, {"progress", "PROGRESS"}, {"elapsed", "ELAPSED"}, {"partition", "PARTITION"}, {"gpu", "GPU"}, {"cpu", "CPU"}, {"cpu-gpu", "C:G"}, {"mem", "MEM"}, {"memory-cpu", "M:C"}, {"name", "NAME"}}
 	rows := make([][]string, 0, len(jobs))
 	ids := make([]string, 0, len(jobs))
 	for _, j := range jobs {
 		ids = append(ids, strconv.Itoa(j.ID)+"/"+j.State)
-		rows = append(rows, []string{strconv.Itoa(j.ID), j.Account, j.QoS, progressBar(j.Progress, 10, colorEnabled), j.Partition, strconv.Itoa(j.GPUs), strconv.Itoa(j.CPUs), cpuGPU(j.CPUs, j.GPUs), gb(j.MemoryMB), memoryCPU(j.MemoryMB, j.CPUs), j.Name})
+		rows = append(rows, []string{strconv.Itoa(j.ID), j.Account, j.QoS, progressBar(j.Progress, 10, colorEnabled), j.Elapsed, j.Partition, strconv.Itoa(j.GPUs), strconv.Itoa(j.CPUs), cpuGPU(j.CPUs, j.GPUs), gb(j.MemoryMB), memoryCPU(j.MemoryMB, j.CPUs), j.Name})
 	}
 	header, lines, headerColumns := renderTable(columns, rows, by, asc)
 	return []string{header}, lines, ids, headerColumns

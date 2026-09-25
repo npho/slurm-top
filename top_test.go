@@ -12,7 +12,7 @@ import (
 
 func TestQueueAggregation(t *testing.T) {
 	input := `{"jobs":[
- {"job_id":42,"account":"research","qos":"normal","partition":"gpu","name":"training","user_name":"alice","job_state":["RUNNING"],"start_time":{"set":true,"number":0},"end_time":{"set":true,"number":100},"tres_alloc_str":"cpu=8,mem=16G,gres/gpu=2,gres/gpu:a100=2","tres_req_str":"cpu=99,mem=99G,gres/gpu=99"},
+ {"job_id":42,"account":"research","qos":"normal","partition":"gpu","name":"training","user_name":"alice","job_state":["RUNNING"],"start_time":{"set":true,"number":0},"end_time":{"set":true,"number":100},"time_limit":{"set":true,"number":100},"tres_alloc_str":"cpu=8,mem=16G,gres/gpu=2,gres/gpu:a100=2","tres_req_str":"cpu=99,mem=99G,gres/gpu=99"},
  {"user_name":"alice","job_state":["PENDING"],"tres_req_str":"cpu=4,mem=2048M,gres/gpu:a100=1"},
  {"user_name":"bob","job_state":["RUNNING"],"tres_alloc_str":"cpu=2,mem=512,gres/gpu=1"},
  {"user_name":"bob","job_state":["COMPLETED"],"tres_alloc_str":"cpu=100,mem=100G"}]}`
@@ -35,7 +35,7 @@ func TestQueueAggregation(t *testing.T) {
 	if title := topLines(s, "gpu", 0)[0]; !strings.Contains(title, "2 users / 2 running / 1 pending") {
 		t.Fatalf("title: %q", title)
 	}
-	if len(s.Jobs) != 3 || s.Jobs[0].ID != 42 || s.Jobs[0].Account != "research" || s.Jobs[0].QoS != "normal" || s.Jobs[0].Partition != "gpu" || s.Jobs[0].Progress != 0 {
+	if len(s.Jobs) != 3 || s.Jobs[0].ID != 42 || s.Jobs[0].Account != "research" || s.Jobs[0].QoS != "normal" || s.Jobs[0].Partition != "gpu" || s.Jobs[0].Progress != 0 || s.Jobs[0].Elapsed != "0% [0-00:00|0-01:40]" {
 		t.Fatalf("jobs: %+v", s.Jobs)
 	}
 	sortUsers(s.Users, "user")
@@ -92,6 +92,10 @@ func TestJobProgressAndBar(t *testing.T) {
 	}
 	if got := jobProgress([]string{"PENDING"}, start, end, time.Unix(150, 0)); got != 0 {
 		t.Fatalf("pending progress = %d, want 0", got)
+	}
+	elapsed, minutes := elapsedStatus([]string{"RUNNING"}, start, slurmTime{Set: true, Number: 2}, time.Unix(160, 0))
+	if elapsed != "50% [0-00:01|0-00:02]" || minutes != 1 {
+		t.Fatalf("elapsed = %q, %d", elapsed, minutes)
 	}
 	if got := progressBar(50, 10, true); got != "\x1b[32m█████\x1b[39m░░░░░" {
 		t.Fatalf("bar = %q", got)

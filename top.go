@@ -31,6 +31,7 @@ type jobRecord struct {
 	State     []string  `json:"job_state"`
 	StartTime slurmTime `json:"start_time"`
 	EndTime   slurmTime `json:"end_time"`
+	TimeLimit slurmTime `json:"time_limit"`
 	Alloc     string    `json:"tres_alloc_str"`
 	Requested string    `json:"tres_req_str"`
 }
@@ -38,17 +39,19 @@ type queueResponse struct {
 	Jobs []jobRecord `json:"jobs"`
 }
 type Job struct {
-	ID        int    `json:"id"`
-	User      string `json:"user"`
-	Account   string `json:"account"`
-	QoS       string `json:"qos"`
-	Partition string `json:"partition"`
-	Name      string `json:"name"`
-	State     string `json:"state"`
-	Progress  int    `json:"progress_percent"`
-	CPUs      int    `json:"cpus"`
-	GPUs      int    `json:"gpus"`
-	MemoryMB  int    `json:"memory_mb"`
+	ID             int    `json:"id"`
+	User           string `json:"user"`
+	Account        string `json:"account"`
+	QoS            string `json:"qos"`
+	Partition      string `json:"partition"`
+	Name           string `json:"name"`
+	State          string `json:"state"`
+	Progress       int    `json:"progress_percent"`
+	Elapsed        string `json:"elapsed"`
+	ElapsedMinutes int    `json:"elapsed_minutes"`
+	CPUs           int    `json:"cpus"`
+	GPUs           int    `json:"gpus"`
+	MemoryMB       int    `json:"memory_mb"`
 }
 type Usage struct {
 	User            string `json:"user"`
@@ -123,6 +126,26 @@ func jobProgress(state []string, start, end slurmTime, at time.Time) int {
 	return min(100, max(0, progress))
 }
 
+func formatElapsed(seconds int64) string {
+	if seconds < 0 {
+		seconds = 0
+	}
+	minutes := seconds / 60
+	return fmt.Sprintf("%d-%02d:%02d", minutes/(24*60), (minutes/60)%24, minutes%60)
+}
+
+func elapsedStatus(state []string, start, limit slurmTime, at time.Time) (string, int) {
+	if !limit.Set || limit.Infinite || limit.Number <= 0 {
+		return "0% [0-00:00|-]", 0
+	}
+	elapsed := int64(0)
+	if slices.Contains(state, "RUNNING") && start.Set && !start.Infinite {
+		elapsed = max(int64(0), at.Unix()-start.Number)
+	}
+	percent := min(100, int(elapsed*100/(limit.Number*60)))
+	return fmt.Sprintf("%d%% [%s|%s]", percent, formatElapsed(elapsed), formatElapsed(limit.Number*60)), int(elapsed / 60)
+}
+
 func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 	var response queueResponse
 	if err := json.Unmarshal(data, &response); err != nil {
@@ -163,6 +186,7 @@ func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 			users[j.User] = u
 		}
 		if running {
+			elapsed, elapsedMinutes := elapsedStatus(j.State, j.StartTime, j.TimeLimit, at)
 			// AllocTRES is authoritative for running jobs. Never mix pending demand
 			// into live allocations or silently substitute requested resources.
 			u.RunningJobs++
@@ -171,14 +195,15 @@ func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 			u.GPUs += gpuFromTRES(j.Alloc)
 			u.MemoryMB += memoryMB(tresValue(j.Alloc, "mem"))
 			gpuTypeCounts(j.Alloc, &snap.H200Allocated, &snap.MIGAllocated, &snap.OtherGPUAllocated)
-			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "RUNNING", Progress: jobProgress(j.State, j.StartTime, j.EndTime, at), CPUs: number(tresValue(j.Alloc, "cpu")), GPUs: gpuFromTRES(j.Alloc), MemoryMB: memoryMB(tresValue(j.Alloc, "mem"))})
+			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "RUNNING", Progress: jobProgress(j.State, j.StartTime, j.EndTime, at), Elapsed: elapsed, ElapsedMinutes: elapsedMinutes, CPUs: number(tresValue(j.Alloc, "cpu")), GPUs: gpuFromTRES(j.Alloc), MemoryMB: memoryMB(tresValue(j.Alloc, "mem"))})
 		} else {
 			u.PendingJobs++
 			snap.PendingJobs++
 			u.PendingCPUs += number(tresValue(j.Requested, "cpu"))
 			u.PendingGPUs += gpuFromTRES(j.Requested)
 			u.PendingMemoryMB += memoryMB(tresValue(j.Requested, "mem"))
-			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "PENDING", CPUs: number(tresValue(j.Requested, "cpu")), GPUs: gpuFromTRES(j.Requested), MemoryMB: memoryMB(tresValue(j.Requested, "mem"))})
+			elapsed, elapsedMinutes := elapsedStatus(j.State, j.StartTime, j.TimeLimit, at)
+			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "PENDING", Elapsed: elapsed, ElapsedMinutes: elapsedMinutes, CPUs: number(tresValue(j.Requested, "cpu")), GPUs: gpuFromTRES(j.Requested), MemoryMB: memoryMB(tresValue(j.Requested, "mem"))})
 		}
 	}
 	for _, u := range users {
