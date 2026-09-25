@@ -204,6 +204,8 @@ func ratio(a, b int) string {
 func gb(mib int) string {
 	return strconv.FormatInt((int64(mib)*1_048_576+500_000_000)/1_000_000_000, 10)
 }
+
+func tb(mib int) string { return fmt.Sprintf("%.1f", float64(mib)*1_048_576/1_000_000_000_000) }
 func render(w io.Writer, nodes []Node, format string, at time.Time) error {
 	if format == "grid" {
 		return renderGrid(w, nodes, at, 100, 0, 0, false)

@@ -33,6 +33,12 @@ func TestTypedCountsAndMissingMetrics(t *testing.T) {
 		t.Fatalf("nodes: %+v", nodes)
 	}
 }
+func TestTBFormatsDecimalTerabytes(t *testing.T) {
+	if got := tb(1_000_000); got != "1.0" {
+		t.Fatalf("tb(1000000) = %s, want 1.0", got)
+	}
+}
+
 func TestGBRoundsMiBToNearestDecimalGB(t *testing.T) {
 	for mib, want := range map[int]string{0: "0", 476: "0", 477: "1", 1024: "1", 1536: "2"} {
 		if got := gb(mib); got != want {

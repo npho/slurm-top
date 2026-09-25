@@ -73,12 +73,12 @@ func TestTypesAndJobSorting(t *testing.T) {
 	if len(userColumns) != 9 || len(jobColumns) != 8 || userColumns[5].field != "pending-jobs" || jobColumns[7].field != "name" {
 		t.Fatalf("columns: %v %v", userColumns, jobColumns)
 	}
-	if got := highlightHeader(userHeader("gpu", false), userColumns[1]); !strings.Contains(got, "\x1b[7mJOBS") {
+	if got := highlightHeader(userHeader("gpu", false), userColumns[1]); !strings.Contains(got, "\x1b[7mRUN") {
 		t.Fatalf("highlight: %q", got)
 	}
 	// The arrow in an earlier field is one terminal cell but three UTF-8 bytes.
 	// It must not move the highlighted range for a later column.
-	if got := highlightHeader(userHeader("user", false), userColumns[1]); !strings.Contains(got, "\x1b[7mJOBS  \x1b[0m") {
+	if got := highlightHeader(userHeader("user", false), userColumns[1]); !strings.Contains(got, "\x1b[7mRUN   \x1b[0m") {
 		t.Fatalf("highlight after arrow: %q", got)
 	}
 }

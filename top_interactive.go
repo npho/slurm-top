@@ -292,7 +292,7 @@ func horizontalBars(s Snapshot, width int, colored ...bool) []string {
 		return fmt.Sprintf("%s %s %d/%d", label, coloredBar(n, total, 8, enabled), n, total)
 	}
 	c := segment("CPU", cpu, s.CapacityCPU)
-	m := fmt.Sprintf("MEM %s %s/%sGB", coloredBar(mem, s.CapacityMemoryMB, 8, enabled), gb(mem), gb(s.CapacityMemoryMB))
+	m := fmt.Sprintf("MEM %s %s TB/%s TB", coloredBar(mem, s.CapacityMemoryMB, 8, enabled), tb(mem), tb(s.CapacityMemoryMB))
 	h := segment("H200", s.H200Allocated, s.H200Capacity)
 	mig := segment("H200-MIG", s.MIGAllocated, s.MIGCapacity)
 	visible := func(v string) int { return utf8.RuneCountInString(sgrPattern.ReplaceAllString(v, "")) }
@@ -383,7 +383,10 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 		}
 		var b bytes.Buffer
 		b.WriteString("\x1b[H\x1b[2J")
-		title := fmt.Sprintf("slurm-top  %s  %d running / %d pending jobs  %s  sort: %s %s", s.UpdatedAt.Format("15:04:05"), s.RunningJobs, s.PendingJobs, user, by, map[bool]string{true: "↑", false: "↓"}[asc])
+		title := fmt.Sprintf("slurm-top  %s  %d running / %d pending jobs", s.UpdatedAt.Format("15:04:05"), s.RunningJobs, s.PendingJobs)
+		if user != "" {
+			title += "  " + user
+		}
 		fmt.Fprint(&b, fit(title, width-1), "\r\n")
 		for _, line := range bars {
 			if colorBars {

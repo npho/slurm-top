@@ -273,12 +273,12 @@ func leftHeader(label, field, by string, asc bool, width int) string {
 func userHeader(by string, asc bool) string {
 	return strings.Join([]string{
 		leftHeader("USER", "user", by, asc, 16),
-		leftHeader("JOBS", "jobs", by, asc, 6),
+		leftHeader("RUN", "jobs", by, asc, 6),
 		leftHeader("CPU", "cpu", by, asc, 6),
 		leftHeader("MEM", "mem", by, asc, 6),
 		leftHeader("GPU", "gpu", by, asc, 6),
 		" ",
-		leftHeader("JOBS", "pending-jobs", by, asc, 6),
+		leftHeader("PEND", "pending-jobs", by, asc, 6),
 		leftHeader("CPU", "pending-cpu", by, asc, 6),
 		leftHeader("MEM", "pending-mem", by, asc, 6),
 		leftHeader("GPU", "pending-gpu", by, asc, 6),
@@ -316,10 +316,10 @@ func topLines(s Snapshot, by string, width int) []string {
 		m += u.MemoryMB
 	}
 	lines := []string{
-		fmt.Sprintf("slurm-top  %s    %d running / %d pending jobs    sort: %s", s.UpdatedAt.Format("15:04:05"), s.RunningJobs, s.PendingJobs, by),
+		fmt.Sprintf("slurm-top  %s    %d running / %d pending jobs", s.UpdatedAt.Format("15:04:05"), s.RunningJobs, s.PendingJobs),
 		fmt.Sprintf("GPU allocated  %s %d/%d", percentBar(g, s.CapacityGPU, 20), g, s.CapacityGPU),
 		fmt.Sprintf("CPU allocated  %s %d/%d", percentBar(c, s.CapacityCPU, 20), c, s.CapacityCPU),
-		fmt.Sprintf("MEM allocated  %s %s/%s GB", percentBar(m, s.CapacityMemoryMB, 20), gb(m), gb(s.CapacityMemoryMB)),
+		fmt.Sprintf("MEM allocated  %s %s TB/%s TB", percentBar(m, s.CapacityMemoryMB, 20), tb(m), tb(s.CapacityMemoryMB)),
 		"Bars = allocations / cluster capacity. Not measured utilization.",
 		userHeader(by, false),
 	}
