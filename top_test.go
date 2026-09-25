@@ -12,7 +12,7 @@ import (
 
 func TestQueueAggregation(t *testing.T) {
 	input := `{"jobs":[
- {"job_id":42,"account":"research","qos":"normal","name":"training","user_name":"alice","job_state":["RUNNING"],"start_time":{"set":true,"number":0},"end_time":{"set":true,"number":100},"tres_alloc_str":"cpu=8,mem=16G,gres/gpu=2,gres/gpu:a100=2","tres_req_str":"cpu=99,mem=99G,gres/gpu=99"},
+ {"job_id":42,"account":"research","qos":"normal","partition":"gpu","name":"training","user_name":"alice","job_state":["RUNNING"],"start_time":{"set":true,"number":0},"end_time":{"set":true,"number":100},"tres_alloc_str":"cpu=8,mem=16G,gres/gpu=2,gres/gpu:a100=2","tres_req_str":"cpu=99,mem=99G,gres/gpu=99"},
  {"user_name":"alice","job_state":["PENDING"],"tres_req_str":"cpu=4,mem=2048M,gres/gpu:a100=1"},
  {"user_name":"bob","job_state":["RUNNING"],"tres_alloc_str":"cpu=2,mem=512,gres/gpu=1"},
  {"user_name":"bob","job_state":["COMPLETED"],"tres_alloc_str":"cpu=100,mem=100G"}]}`
@@ -35,7 +35,7 @@ func TestQueueAggregation(t *testing.T) {
 	if title := topLines(s, "gpu", 0)[0]; !strings.Contains(title, "2 users / 2 running / 1 pending") {
 		t.Fatalf("title: %q", title)
 	}
-	if len(s.Jobs) != 3 || s.Jobs[0].ID != 42 || s.Jobs[0].Account != "research" || s.Jobs[0].QoS != "normal" || s.Jobs[0].Progress != 0 {
+	if len(s.Jobs) != 3 || s.Jobs[0].ID != 42 || s.Jobs[0].Account != "research" || s.Jobs[0].QoS != "normal" || s.Jobs[0].Partition != "gpu" || s.Jobs[0].Progress != 0 {
 		t.Fatalf("jobs: %+v", s.Jobs)
 	}
 	sortUsers(s.Users, "user")
@@ -73,7 +73,7 @@ func TestTypesAndJobSorting(t *testing.T) {
 		t.Fatal("header columns")
 	}
 	userColumns, jobColumns := headerColumns(""), headerColumns("a")
-	if len(userColumns) != 13 || len(jobColumns) != 10 || userColumns[7].field != "pending-jobs" || jobColumns[9].field != "name" {
+	if len(userColumns) != 13 || len(jobColumns) != 11 || userColumns[7].field != "pending-jobs" || jobColumns[10].field != "name" {
 		t.Fatalf("columns: %v %v", userColumns, jobColumns)
 	}
 	if got := highlightHeader(userHeader("gpu", false), userColumns[1]); !strings.Contains(got, "\x1b[7mRUN") {

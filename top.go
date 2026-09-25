@@ -25,6 +25,7 @@ type jobRecord struct {
 	ID        int       `json:"job_id"`
 	Account   string    `json:"account"`
 	QoS       string    `json:"qos"`
+	Partition string    `json:"partition"`
 	Name      string    `json:"name"`
 	User      string    `json:"user_name"`
 	State     []string  `json:"job_state"`
@@ -37,16 +38,17 @@ type queueResponse struct {
 	Jobs []jobRecord `json:"jobs"`
 }
 type Job struct {
-	ID       int    `json:"id"`
-	User     string `json:"user"`
-	Account  string `json:"account"`
-	QoS      string `json:"qos"`
-	Name     string `json:"name"`
-	State    string `json:"state"`
-	Progress int    `json:"progress_percent"`
-	CPUs     int    `json:"cpus"`
-	GPUs     int    `json:"gpus"`
-	MemoryMB int    `json:"memory_mb"`
+	ID        int    `json:"id"`
+	User      string `json:"user"`
+	Account   string `json:"account"`
+	QoS       string `json:"qos"`
+	Partition string `json:"partition"`
+	Name      string `json:"name"`
+	State     string `json:"state"`
+	Progress  int    `json:"progress_percent"`
+	CPUs      int    `json:"cpus"`
+	GPUs      int    `json:"gpus"`
+	MemoryMB  int    `json:"memory_mb"`
 }
 type Usage struct {
 	User            string `json:"user"`
@@ -153,6 +155,7 @@ func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 		j.User = printable(j.User)
 		j.Account = printable(j.Account)
 		j.QoS = printable(j.QoS)
+		j.Partition = printable(j.Partition)
 		j.Name = printable(j.Name)
 		u := users[j.User]
 		if u == nil {
@@ -168,14 +171,14 @@ func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 			u.GPUs += gpuFromTRES(j.Alloc)
 			u.MemoryMB += memoryMB(tresValue(j.Alloc, "mem"))
 			gpuTypeCounts(j.Alloc, &snap.H200Allocated, &snap.MIGAllocated, &snap.OtherGPUAllocated)
-			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Name: j.Name, State: "RUNNING", Progress: jobProgress(j.State, j.StartTime, j.EndTime, at), CPUs: number(tresValue(j.Alloc, "cpu")), GPUs: gpuFromTRES(j.Alloc), MemoryMB: memoryMB(tresValue(j.Alloc, "mem"))})
+			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "RUNNING", Progress: jobProgress(j.State, j.StartTime, j.EndTime, at), CPUs: number(tresValue(j.Alloc, "cpu")), GPUs: gpuFromTRES(j.Alloc), MemoryMB: memoryMB(tresValue(j.Alloc, "mem"))})
 		} else {
 			u.PendingJobs++
 			snap.PendingJobs++
 			u.PendingCPUs += number(tresValue(j.Requested, "cpu"))
 			u.PendingGPUs += gpuFromTRES(j.Requested)
 			u.PendingMemoryMB += memoryMB(tresValue(j.Requested, "mem"))
-			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Name: j.Name, State: "PENDING", CPUs: number(tresValue(j.Requested, "cpu")), GPUs: gpuFromTRES(j.Requested), MemoryMB: memoryMB(tresValue(j.Requested, "mem"))})
+			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "PENDING", CPUs: number(tresValue(j.Requested, "cpu")), GPUs: gpuFromTRES(j.Requested), MemoryMB: memoryMB(tresValue(j.Requested, "mem"))})
 		}
 	}
 	for _, u := range users {

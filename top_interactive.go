@@ -101,6 +101,8 @@ func sortJobs(jobs []Job, by string, asc bool) {
 			cmp = strings.Compare(a.Name, b.Name)
 		case "qos":
 			cmp = strings.Compare(a.QoS, b.QoS)
+		case "partition":
+			cmp = strings.Compare(a.Partition, b.Partition)
 		case "progress":
 			cmp = a.Progress - b.Progress
 		case "cpu-gpu":
@@ -212,12 +214,12 @@ func topRows(s Snapshot, user, by string, asc bool, color ...bool) ([]string, []
 		}
 	}
 	sortJobs(jobs, by, asc)
-	columns := []tableColumn{{"id", "JOB ID"}, {"account", "ACCOUNT"}, {"qos", "QOS"}, {"progress", "PROGRESS"}, {"gpu", "GPU"}, {"cpu", "CPU"}, {"cpu-gpu", "C:G"}, {"mem", "MEM"}, {"memory-cpu", "M:C"}, {"name", "NAME"}}
+	columns := []tableColumn{{"id", "JOB ID"}, {"account", "ACCOUNT"}, {"qos", "QOS"}, {"progress", "PROGRESS"}, {"partition", "PARTITION"}, {"gpu", "GPU"}, {"cpu", "CPU"}, {"cpu-gpu", "C:G"}, {"mem", "MEM"}, {"memory-cpu", "M:C"}, {"name", "NAME"}}
 	rows := make([][]string, 0, len(jobs))
 	ids := make([]string, 0, len(jobs))
 	for _, j := range jobs {
 		ids = append(ids, strconv.Itoa(j.ID)+"/"+j.State)
-		rows = append(rows, []string{strconv.Itoa(j.ID), j.Account, j.QoS, progressBar(j.Progress, 10, colorEnabled), strconv.Itoa(j.GPUs), strconv.Itoa(j.CPUs), cpuGPU(j.CPUs, j.GPUs), gb(j.MemoryMB), memoryCPU(j.MemoryMB, j.CPUs), j.Name})
+		rows = append(rows, []string{strconv.Itoa(j.ID), j.Account, j.QoS, progressBar(j.Progress, 10, colorEnabled), j.Partition, strconv.Itoa(j.GPUs), strconv.Itoa(j.CPUs), cpuGPU(j.CPUs, j.GPUs), gb(j.MemoryMB), memoryCPU(j.MemoryMB, j.CPUs), j.Name})
 	}
 	header, lines, headerColumns := renderTable(columns, rows, by, asc)
 	return []string{header}, lines, ids, headerColumns
@@ -239,8 +241,8 @@ func headerColumns(user string) []headerColumn {
 	}
 	return []headerColumn{
 		{"id", 1, 11}, {"account", 13, 26}, {"qos", 28, 37}, {"progress", 39, 48},
-		{"gpu", 50, 57}, {"cpu", 59, 66}, {"cpu-gpu", 68, 75}, {"mem", 77, 86},
-		{"memory-cpu", 88, 97}, {"name", 100, 9999},
+		{"partition", 50, 65}, {"gpu", 67, 74}, {"cpu", 76, 83}, {"cpu-gpu", 85, 92},
+		{"mem", 94, 103}, {"memory-cpu", 105, 114}, {"name", 117, 9999},
 	}
 }
 
