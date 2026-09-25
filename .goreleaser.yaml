@@ -32,6 +32,10 @@ nfpms:
     contents:
       - src: README.md
         dst: /usr/share/doc/slurm-top/README.md
+      - src: LICENSE
+        dst: /usr/share/doc/slurm-top/LICENSE
+      - src: man/slurm-top.1
+        dst: /usr/share/man/man1/slurm-top.1
 
 archives:
   - id: default

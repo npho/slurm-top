@@ -41,8 +41,10 @@ commands that mutate Slurm state.
 
 `.github/workflows/release.yml` runs when a GitHub release is published. It
 validates the tagged revision and invokes GoReleaser using `.goreleaser.yaml`
-to upload Linux `amd64` archives plus `.deb` and `.rpm` assets. Keep package
-paths, the binary name, and `README.md` installation instructions in sync.
+to upload Linux `amd64` archives plus `.deb` and `.rpm` assets. Distribution
+packages install the binary in `/usr/bin`; reserve `/usr/local/bin` for
+unpackaged local administration. Keep package paths, the binary name,
+`man/slurm-top.1`, and `README.md` installation instructions in sync.
 
 Do not publish a release from an unverified commit. Run the standard local
 validation first, push an annotated `vX.Y.Z` tag, then publish that tag through

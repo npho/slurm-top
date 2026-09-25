@@ -38,9 +38,17 @@ sudo dnf install ./slurm-top_*.x86_64.rpm
 sudo apt install ./slurm-top_*_amd64.deb
 ```
 
-The package installs `slurm-top` to `/usr/bin/slurm-top`. Slurm client commands
-(`squeue` and `scontrol`) and controller-query permission are still required at
-runtime.
+The package installs `slurm-top` to `/usr/bin/slurm-top`, which is the
+appropriate path for distribution-managed executables. Use `/usr/local/bin`
+for a manual, administrator-local installation that is not managed by a
+package. Slurm client commands (`squeue` and `scontrol`) and controller-query
+permission are still required at runtime.
+
+Packages also install the manual page. After installation, run:
+
+```sh
+man slurm-top
+```
 
 ## Usage
 
@@ -145,6 +153,7 @@ GitHub Actions packages a published GitHub release using
 commit, create an annotated tag such as `v1.0.0`, push the tag, then use
 GitHub's **Releases → Draft a new release** flow and publish that tag. The
 workflow runs tests and vet, builds the Linux `amd64` binary, creates `.deb`
-and `.rpm` packages, and uploads them to the release.
+and `.rpm` packages (including the manual page), and uploads them to the
+release.
 
 See [AGENTS.md](AGENTS.md) for contribution guidance.

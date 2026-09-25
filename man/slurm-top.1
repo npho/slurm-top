@@ -1,0 +1,110 @@
+.TH SLURM-TOP 1 "2025" "slurm-top" "User Commands"
+.SH NAME
+slurm-top \- terminal dashboard for Slurm allocations
+.SH SYNOPSIS
+.B slurm-top
+.RI [ options ]
+.SH DESCRIPTION
+.B slurm-top
+queries Slurm node capacity with
+.B scontrol show node -o
+and queue information with
+.BR squeue --json .
+It displays scheduler allocations and pending requests; it does not report
+sampled CPU, GPU, or memory utilization.
+.PP
+When the default
+.B top
+format writes to a terminal, it opens an alternate-screen interactive UI.
+When output is not a terminal, it writes a one-time, pipe-friendly snapshot.
+.SH OPTIONS
+.TP
+.BR --all
+Include non-GPU nodes in node-oriented views.
+.TP
+.BR --format " " \fItop\fR|\fIjson\fR|\fIgrid\fR|\fIdetail\fR|\fItable
+Select an output format. The default is
+.BR top .
+The compatibility value
+.B dashboard
+is an alias for
+.BR grid .
+.TP
+.BR --sort " " \fIgpu\fR|\fIcpu\fR|\fImem\fR|\fIjobs\fR|\fIuser
+Select the initial summary sort. The default is descending running GPU
+allocation.
+.TP
+.BR --interactive
+Require the alternate-screen interactive UI. It requires terminal standard
+input and output.
+.TP
+.BR --watch " " \fIduration
+Refresh at the supplied Go duration, such as
+.BR 5s .
+A zero duration prints once outside the interactive UI.
+.TP
+.BR --timeout " " \fIduration
+Set the timeout for each Slurm query. The default is
+.BR 10s .
+.TP
+.BR -h , " " --help
+Show command help.
+.SH INTERACTIVE CONTROLS
+The summary initially sorts running GPUs descending. Use Up and Down, or the
+mouse wheel, to select a user. Right or Enter opens that user's job table.
+Left returns to the summary and preserves its prior sort and selected user.
+.PP
+Press Up from the first row to focus column headers. In header focus, use Left
+and Right to choose a column and Enter to sort it descending; a subsequent
+Enter changes the same column to ascending. Clicking a column header also
+sorts it. The keys
+.BR g ,
+.BR c ,
+.BR m ,
+.BR j ,
+and
+.B u
+select GPU, CPU, memory, running-job, and username summary sorts.
+.B r
+refreshes and
+.B q
+or Ctrl-C exits.
+.PP
+A job table defaults to elapsed time descending. If it exceeds terminal width,
+use Left and Right while a row is focused to scroll horizontally. Left at the
+left edge returns to the summary.
+.SH DISPLAY SEMANTICS
+Running allocations use the Slurm
+.B tres_alloc_str
+field. Pending demand uses
+.B tres_req_str
+and is shown separately. Capacity is derived from
+.BR scontrol .
+CPU-per-GPU and memory-per-CPU values are ratios of scheduler allocations.
+Memory table values are decimal GB; aggregate memory summaries are decimal TB.
+.PP
+Job details include QoS, partition, progress, and elapsed/requested time.
+Elapsed time is formatted as
+.BR percent% " [" elapsed "|" requested "]" .
+It is a schedule-time estimate, not measured completion. H200 and H200-MIG
+bars use typed GPU TRES; generic or other GPU types are not included in those
+typed bars.
+.SH ENVIRONMENT
+.TP
+.B NO_COLOR
+When set, disables supported terminal colors.
+.TP
+.B CLICOLOR
+Set to
+.B 0
+to disable supported terminal colors.
+.SH FILES
+.TP
+.I /usr/bin/slurm-top
+System package installation path.
+.TP
+.I /usr/share/doc/slurm-top/README.md
+Package documentation.
+.SH SEE ALSO
+.BR squeue (1),
+.BR scontrol (1)
