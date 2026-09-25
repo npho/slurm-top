@@ -1,0 +1,43 @@
+version: 2
+
+project_name: slurm-top
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: slurm-top
+    main: .
+    binary: slurm-top
+    goos:
+      - linux
+    goarch:
+      - amd64
+    ldflags:
+      - -s -w
+
+nfpms:
+  - id: linux-packages
+    package_name: slurm-top
+    vendor: slurm-top contributors
+    homepage: https://github.com/{{ .Env.GITHUB_REPOSITORY }}
+    maintainer: slurm-top contributors
+    description: Terminal dashboard for Slurm allocations
+    license: MIT
+    bindir: /usr/bin
+    formats:
+      - deb
+      - rpm
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/slurm-top/README.md
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+
+release:
+  draft: false
+  prerelease: auto

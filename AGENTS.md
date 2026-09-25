@@ -37,6 +37,18 @@ Tests should not require a live Slurm controller. Prefer testing parsers and
 renderers with fixture strings or JSON, as the existing tests do. Do not run
 commands that mutate Slurm state.
 
+## Releases and packages
+
+`.github/workflows/release.yml` runs when a GitHub release is published. It
+validates the tagged revision and invokes GoReleaser using `.goreleaser.yaml`
+to upload Linux `amd64` archives plus `.deb` and `.rpm` assets. Keep package
+paths, the binary name, and `README.md` installation instructions in sync.
+
+Do not publish a release from an unverified commit. Run the standard local
+validation first, push an annotated `vX.Y.Z` tag, then publish that tag through
+GitHub Releases. The workflow's `GITHUB_TOKEN` can upload assets but does not
+sign packages; add a separate signing design before claiming signed artifacts.
+
 ## Go practices
 
 - Target the Go version declared in `go.mod`; do not lower it without an

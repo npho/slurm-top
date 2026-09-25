@@ -26,6 +26,22 @@ make fmt
 Or build directly with `go build -o slurm-top .`. Remove the local binary with
 `make clean`.
 
+## Install release packages
+
+GitHub releases include Linux `amd64` packages:
+
+```sh
+# Rocky Linux / RHEL-family systems
+sudo dnf install ./slurm-top_*.x86_64.rpm
+
+# Ubuntu / Debian-family systems
+sudo apt install ./slurm-top_*_amd64.deb
+```
+
+The package installs `slurm-top` to `/usr/bin/slurm-top`. Slurm client commands
+(`squeue` and `scontrol`) and controller-query permission are still required at
+runtime.
+
 ## Usage
 
 ```sh
@@ -121,5 +137,14 @@ backend with per-job access would be required for measured utilization.
 - `grid.go`, `dashboard.go`, `interactive.go` — node-oriented display helpers
 - `*_test.go` — parser, rendering, and UI behavior tests
 - `Makefile` — standard build, test, vet, format, and clean targets
+
+## Publishing a release
+
+GitHub Actions packages a published GitHub release using
+[GoReleaser](https://goreleaser.com/). To publish, push the intended version
+commit, create an annotated tag such as `v1.0.0`, push the tag, then use
+GitHub's **Releases → Draft a new release** flow and publish that tag. The
+workflow runs tests and vet, builds the Linux `amd64` binary, creates `.deb`
+and `.rpm` packages, and uploads them to the release.
 
 See [AGENTS.md](AGENTS.md) for contribution guidance.
