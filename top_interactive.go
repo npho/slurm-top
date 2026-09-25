@@ -423,6 +423,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	user, by, asc, selected, scroll, message := "", initialSort, false, 0, 0, ""
+	summaryBy, summaryAsc, returnUser := initialSort, false, ""
 	hScroll, tableWidth := 0, 0
 	headerFocused, selectedHeader, headerActivated := false, 0, false
 	width, height, headerY, rows := 80, 24, 5, 1
@@ -463,6 +464,15 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 		}
 		if selectedHeader < 0 {
 			selectedHeader = 0
+		}
+		if user == "" && returnUser != "" {
+			for i, id := range rowIDs {
+				if id == returnUser {
+					selected = i
+					break
+				}
+			}
+			returnUser = ""
 		}
 		if len(items) == 0 {
 			selected, scroll = 0, 0
@@ -565,6 +575,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 						headerActivated = false
 					}
 				} else if user == "" && selected < len(ids) {
+					summaryBy, summaryAsc = by, asc
 					user = ids[selected]
 					by = "elapsed"
 					asc = false
@@ -585,6 +596,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					selected = 0
 					scroll = 0
 				} else if user == "" && selected < len(ids) {
+					summaryBy, summaryAsc = by, asc
 					user = ids[selected]
 					by = "elapsed"
 					asc = false
@@ -598,8 +610,9 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				} else if user != "" && hScroll > 0 {
 					hScroll = max(0, hScroll-max(1, (width-1)/2))
 				} else if user != "" {
+					returnUser = user
 					user = ""
-					by = initialSort
+					by, asc = summaryBy, summaryAsc
 					selected, scroll, hScroll = 0, 0, 0
 				}
 			case "g", "c", "m", "u":
