@@ -69,7 +69,7 @@ func TestTypesAndJobSorting(t *testing.T) {
 	if len(lines) != 2 || ids[0] != "2/RUNNING" || !strings.Contains(lines[0], "z") {
 		t.Fatalf("rows %v %v", lines, ids)
 	}
-	if headerSort(5, "") != "user" || headerSort(40, "") != "gpu" || headerSort(20, "a") != "account" {
+	if headerSort(5, "") != "user" || headerSort(26, "") != "gpu" || headerSort(33, "") != "cpu" || headerSort(20, "a") != "account" {
 		t.Fatal("header columns")
 	}
 	userColumns, jobColumns := headerColumns(""), headerColumns("a")

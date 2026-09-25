@@ -274,14 +274,14 @@ func userHeader(by string, asc bool) string {
 	return strings.Join([]string{
 		leftHeader("USER", "user", by, asc, 16),
 		leftHeader("RUN", "jobs", by, asc, 6),
+		leftHeader("GPU", "gpu", by, asc, 6),
 		leftHeader("CPU", "cpu", by, asc, 6),
 		leftHeader("MEM", "mem", by, asc, 6),
-		leftHeader("GPU", "gpu", by, asc, 6),
 		" ",
 		leftHeader("PEND", "pending-jobs", by, asc, 6),
+		leftHeader("GPU", "pending-gpu", by, asc, 6),
 		leftHeader("CPU", "pending-cpu", by, asc, 6),
 		leftHeader("MEM", "pending-mem", by, asc, 6),
-		leftHeader("GPU", "pending-gpu", by, asc, 6),
 	}, " ")
 }
 func collectTop(ctx context.Context) (Snapshot, error) {
@@ -324,7 +324,7 @@ func topLines(s Snapshot, by string, width int) []string {
 		userHeader(by, false),
 	}
 	for _, u := range users {
-		lines = append(lines, fmt.Sprintf("%-16.16s %6d %6d %6s %6d  %6d %6d %6s %6d", u.User, u.RunningJobs, u.CPUs, gb(u.MemoryMB), u.GPUs, u.PendingJobs, u.PendingCPUs, gb(u.PendingMemoryMB), u.PendingGPUs))
+		lines = append(lines, fmt.Sprintf("%-16.16s %6d %6d %6d %6s  %6d %6d %6d %6s", u.User, u.RunningJobs, u.GPUs, u.CPUs, gb(u.MemoryMB), u.PendingJobs, u.PendingGPUs, u.PendingCPUs, gb(u.PendingMemoryMB)))
 	}
 	if len(users) == 0 {
 		lines = append(lines, "No running or pending jobs.")

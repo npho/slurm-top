@@ -145,7 +145,7 @@ func topRows(s Snapshot, user, by string, asc bool, color ...bool) ([]string, []
 		ids := make([]string, 0, len(users))
 		for _, u := range users {
 			ids = append(ids, u.User)
-			lines = append(lines, fmt.Sprintf("%-16.16s %6d %6d %6s %6d  %6d %6d %6s %6d", u.User, u.RunningJobs, u.CPUs, gb(u.MemoryMB), u.GPUs, u.PendingJobs, u.PendingCPUs, gb(u.PendingMemoryMB), u.PendingGPUs))
+			lines = append(lines, fmt.Sprintf("%-16.16s %6d %6d %6d %6s  %6d %6d %6d %6s", u.User, u.RunningJobs, u.GPUs, u.CPUs, gb(u.MemoryMB), u.PendingJobs, u.PendingGPUs, u.PendingCPUs, gb(u.PendingMemoryMB)))
 		}
 		return []string{userHeader(by, asc)}, lines, ids
 	}
@@ -160,15 +160,15 @@ func topRows(s Snapshot, user, by string, asc bool, color ...bool) ([]string, []
 	ids := make([]string, 0, len(jobs))
 	for _, j := range jobs {
 		ids = append(ids, strconv.Itoa(j.ID)+"/"+j.State)
-		lines = append(lines, fmt.Sprintf("%-11d %-14.14s %-10.10s %-10s %8d %8d %10s  %s", j.ID, j.Account, j.QoS, progressBar(j.Progress, 10, colorEnabled), j.CPUs, j.GPUs, gb(j.MemoryMB), j.Name))
+		lines = append(lines, fmt.Sprintf("%-11d %-14.14s %-10.10s %-10s %8d %8d %10s  %s", j.ID, j.Account, j.QoS, progressBar(j.Progress, 10, colorEnabled), j.GPUs, j.CPUs, gb(j.MemoryMB), j.Name))
 	}
 	header := strings.Join([]string{
 		leftHeader("JOB ID", "id", by, asc, 11),
 		leftHeader("ACCOUNT", "account", by, asc, 14),
 		leftHeader("QOS", "qos", by, asc, 10),
 		leftHeader("PROGRESS", "progress", by, asc, 10),
-		leftHeader("CPU", "cpu", by, asc, 8),
 		leftHeader("GPU", "gpu", by, asc, 8),
+		leftHeader("CPU", "cpu", by, asc, 8),
 		leftHeader("MEM", "mem", by, asc, 10),
 		leftHeader("NAME", "name", by, asc, 20),
 	}, " ")
@@ -183,14 +183,14 @@ type headerColumn struct {
 func headerColumns(user string) []headerColumn {
 	if user == "" {
 		return []headerColumn{
-			{"user", 1, 16}, {"jobs", 18, 23}, {"cpu", 25, 30}, {"mem", 32, 37},
-			{"gpu", 39, 44}, {"pending-jobs", 48, 53}, {"pending-cpu", 55, 60},
-			{"pending-mem", 62, 67}, {"pending-gpu", 69, 74},
+			{"user", 1, 16}, {"jobs", 18, 23}, {"gpu", 25, 30}, {"cpu", 32, 37},
+			{"mem", 39, 44}, {"pending-jobs", 48, 53}, {"pending-gpu", 55, 60},
+			{"pending-cpu", 62, 67}, {"pending-mem", 69, 74},
 		}
 	}
 	return []headerColumn{
 		{"id", 1, 11}, {"account", 13, 26}, {"qos", 28, 37}, {"progress", 39, 48},
-		{"cpu", 50, 57}, {"gpu", 59, 66}, {"mem", 68, 77}, {"name", 80, 9999},
+		{"gpu", 50, 57}, {"cpu", 59, 66}, {"mem", 68, 77}, {"name", 80, 9999},
 	}
 }
 
