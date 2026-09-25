@@ -66,14 +66,25 @@ Run `./slurm-top --help` for all flags. Key options are:
 ## Interactive controls
 
 The default `top` UI refreshes every five seconds when attached to a terminal.
-Use **Up/Down** or the mouse wheel to select a user, **Right** or **Enter** to
-open that user's job list, and **Left** to return. Press **Up** from the first
-row to focus the column header; use **Left/Right** to choose a column and
-**Enter** to sort it descending, then ascending on the next Enter. This works
-in both the user and job panes. Click a column heading to sort (click again to
-reverse it), or click a row to select it. Keyboard sorting shortcuts are `g`
-(GPU), `c` (CPU), `m` (memory), `j` (running jobs), and `u` (username); `r`
-refreshes; `q` or Ctrl-C exits.
+The summary defaults to running GPU allocation descending; opening a user
+shows that user's jobs sorted by elapsed time descending. Use **Up/Down** or
+the mouse wheel to select a user, **Right** or **Enter** to open their job
+list, and **Left** to return. Returning restores the prior summary sort and
+selection.
+
+Press **Up** from the first row to focus the column header; use **Left/Right**
+to choose a column and **Enter** to sort it descending, then ascending on the
+next Enter. Click a column heading to sort (click again to reverse it), or
+click a row to select it. In a job table that is wider than the terminal, use
+**Left/Right** while a row is focused to scroll horizontally; **Left** at its
+left edge returns to the summary. Keyboard sorting shortcuts are `g` (GPU),
+`c` (CPU), `m` (memory), `j` (running jobs), and `u` (username); `r` refreshes;
+`q` or Ctrl-C exits.
+
+Summary columns show running and pending `GPU`, `CPU`, `C:G` (CPU per GPU),
+`MEM`, and `M:C` (decimal GB per CPU). Job columns include account, QoS,
+progress, elapsed/requested time, partition, resources, and job name. Columns
+size themselves to visible content and reserve sort-arrow space.
 
 Mouse support requires an SGR-mouse-compatible terminal. The program restores
 the screen and mouse mode on exit. Set `NO_COLOR=1` or `CLICOLOR=0` to disable
@@ -85,8 +96,15 @@ color in supported node displays.
 - Pending demand comes from `tres_req_str` and is shown separately from live
   allocations.
 - Capacity comes from `scontrol show node -o`.
-- H200 and H200 MIG bars classify typed GPU TRES. Other or generic GPU TRES are
-  not included in those H200-specific bars.
+- The interactive header uses separate CPU, memory, and GPU boxes. GPU shows
+  H200 and H200-MIG allocations separately; generic or other GPU types remain
+  part of aggregate GPU totals but not those typed bars.
+- Job QoS, partition, start/end time, and requested time limit come from
+  `squeue --json`. Elapsed time is rendered as
+  `percent% [elapsed|requested]`; unknown or unlimited requested time displays
+  `-`.
+- Memory values in tables are rounded decimal GB; aggregate memory summaries
+  use decimal TB.
 - A failed refresh retains the prior interactive snapshot and reports the
   error.
 

@@ -12,6 +12,13 @@ its corresponding `*_test.go` file. Keep the distinction between **Slurm
 allocations** and observed hardware utilization explicit: this program reports
 allocations and pending requests, not sampled CPU/GPU/RSS usage.
 
+The interactive `top` UI has a summary table and a per-user job table. Its
+columns are content-sized at render time, so header hit areas, highlighting,
+and horizontal scrolling must use the generated `headerColumn` layout rather
+than fixed terminal positions. Job rows can contain ANSI-colored progress
+bars; always measure/crop ANSI text by visible terminal cells and preserve
+terminal state when rendering selected rows.
+
 ## Local workflow
 
 Use the Makefile targets before submitting a change:
@@ -44,6 +51,9 @@ commands that mutate Slurm state.
   commands must honor `--timeout` and Ctrl-C.
 - Preserve safe terminal behavior: restore terminal state/alternate screen and
   mouse mode on every exit path, and keep non-terminal output pipe-friendly.
+- Keep terminal-width calculations ANSI- and Unicode-aware. Do not use byte
+  offsets for arrow-bearing headers or colored rows; ANSI reset codes inside a
+  selected row can cancel its reverse-video highlight.
 - Sanitize any scheduler-provided text before rendering it to a terminal; avoid
   introducing terminal-control-sequence injection.
 - Preserve output compatibility deliberately. JSON field names are part of the
@@ -60,6 +70,9 @@ commands that mutate Slurm state.
   resources for running allocations.
 - Treat capacity from `scontrol` as scheduler capacity, not telemetry.
 - Generic GPU TRES must not be mislabeled as H200 or MIG resources.
+- Treat `qos`, `partition`, start/end time, and time-limit fields from
+  `squeue --json` as scheduler metadata. Elapsed and progress displays are
+  schedule-time estimates, not measured job completion.
 - Node-wide `FreeMem` must not be represented as per-user memory use.
 
 ## Git practices
