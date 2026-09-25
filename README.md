@@ -67,10 +67,13 @@ Run `./slurm-top --help` for all flags. Key options are:
 
 The default `top` UI refreshes every five seconds when attached to a terminal.
 Use **Up/Down** or the mouse wheel to select a user, **Right** or **Enter** to
-open that user's job list, and **Left** to return. Click a column heading to
-sort (click again to reverse it), or click a row to select it. Keyboard sorting
-shortcuts are `g` (GPU), `c` (CPU), `m` (memory), `j` (running jobs), and `u`
-(username); `r` refreshes; `q` or Ctrl-C exits.
+open that user's job list, and **Left** to return. Press **Up** from the first
+row to focus the column header; use **Left/Right** to choose a column and
+**Enter** to sort it descending, then ascending on the next Enter. This works
+in both the user and job panes. Click a column heading to sort (click again to
+reverse it), or click a row to select it. Keyboard sorting shortcuts are `g`
+(GPU), `c` (CPU), `m` (memory), `j` (running jobs), and `u` (username); `r`
+refreshes; `q` or Ctrl-C exits.
 
 Mouse support requires an SGR-mouse-compatible terminal. The program restores
 the screen and mouse mode on exit. Set `NO_COLOR=1` or `CLICOLOR=0` to disable

@@ -151,38 +151,41 @@ func topRows(s Snapshot, user, by string, asc bool) ([]string, []string, []strin
 	}
 	return []string{"JOB ID      ACCOUNT        STATE    CPU req  GPU req   MEM GB     NAME"}, lines, ids
 }
-func headerSort(x int, user string) string {
+
+type headerColumn struct {
+	field      string
+	start, end int // 1-based, inclusive terminal columns
+}
+
+func headerColumns(user string) []headerColumn {
 	if user == "" {
-		switch {
-		case x <= 16:
-			return "user"
-		case x <= 26:
-			return "jobs"
-		case x <= 37:
-			return "cpu"
-		case x <= 47:
-			return "gpu"
-		case x <= 59:
-			return "mem"
+		return []headerColumn{
+			{"user", 1, 16}, {"jobs", 17, 26}, {"cpu", 27, 36},
+			{"gpu", 37, 47}, {"mem", 48, 58},
 		}
-		return ""
 	}
-	switch {
-	case x <= 11:
-		return "id"
-	case x <= 26:
-		return "account"
-	case x <= 35:
-		return "state"
-	case x <= 44:
-		return "cpu"
-	case x <= 53:
-		return "gpu"
-	case x <= 65:
-		return "mem"
-	default:
-		return "name"
+	return []headerColumn{
+		{"id", 1, 12}, {"account", 13, 27}, {"state", 28, 36},
+		{"cpu", 37, 45}, {"gpu", 46, 55}, {"mem", 56, 66}, {"name", 67, 9999},
 	}
+}
+
+func headerSort(x int, user string) string {
+	for _, column := range headerColumns(user) {
+		if x >= column.start && x <= column.end {
+			return column.field
+		}
+	}
+	return ""
+}
+
+func highlightHeader(header string, column headerColumn) string {
+	start := column.start - 1
+	end := min(column.end, len(header))
+	if start < 0 || start >= end {
+		return header
+	}
+	return header[:start] + "\x1b[7m" + header[start:end] + "\x1b[0m" + header[end:]
 }
 
 // Color reflects Slurm allocation / configured capacity, not measured usage.
@@ -291,6 +294,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	user, by, asc, selected, scroll, message := "", initialSort, false, 0, 0, ""
+	headerFocused, headerColumn, headerActivated := false, 0, false
 	width, height, headerY, rows := 80, 24, 5, 1
 	ids := []string{}
 	draw := func() error {
@@ -314,6 +318,13 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 		}
 		headers, items, rowIDs := topRows(s, user, by, asc)
 		ids = rowIDs
+		columns := headerColumns(user)
+		if headerColumn >= len(columns) {
+			headerColumn = len(columns) - 1
+		}
+		if headerColumn < 0 {
+			headerColumn = 0
+		}
 		if len(items) == 0 {
 			selected, scroll = 0, 0
 		} else {
@@ -343,17 +354,23 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 		}
 		note := "Allocated / configured capacity (not measured utilization). GPU MIG instances counted separately."
 		fmt.Fprint(&b, fit(note, width-1), "\r\n")
-		fmt.Fprint(&b, fit(headers[0], width-1), "\r\n")
+		header := headers[0]
+		if headerFocused {
+			header = highlightHeader(header, columns[headerColumn])
+			fmt.Fprint(&b, fitANSI(header, width-1), "\r\n")
+		} else {
+			fmt.Fprint(&b, fit(header, width-1), "\r\n")
+		}
 		for i := scroll; i < len(items) && i < scroll+rows; i++ {
 			line := fit(items[i], width-1)
-			if i == selected {
+			if !headerFocused && i == selected {
 				line = "\x1b[7m" + line + "\x1b[0m"
 			}
 			fmt.Fprint(&b, line, "\r\n")
 		}
-		footer := "↑/↓ select  →/Enter jobs  ← users  click header sort  wheel scroll  g/c/m/j/u sort  q quit"
+		footer := "↑ header/rows  ←/→ header columns  Enter sort  → jobs  ← users  click header sort  q quit"
 		if user != "" {
-			footer = "Jobs: " + user + "  ↑/↓ select  ← users  click header sort  wheel scroll  q quit"
+			footer = "Jobs: " + user + "  ↑ header/rows  ←/→ header columns  Enter sort  ← users  q quit"
 		}
 		if message != "" {
 			footer += "  " + message
@@ -378,18 +395,52 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 			case "q", "Q", "\x03":
 				return nil
 			case "down", "j":
-				if ev.key == "j" && user == "" {
+				if ev.key == "j" && user == "" && !headerFocused {
 					by = "jobs"
 					asc = false
 					selected = 0
 					scroll = 0
+				} else if headerFocused {
+					headerFocused, headerActivated = false, false
+					selected = 0
 				} else {
 					selected++
 				}
 			case "up", "k":
-				selected--
-			case "right", "\r", "\n":
-				if user == "" && selected < len(ids) {
+				if selected == 0 {
+					if !headerFocused {
+						headerActivated = false
+					}
+					headerFocused = true
+				} else {
+					selected--
+				}
+			case "right":
+				if headerFocused {
+					if headerColumn < len(headerColumns(user))-1 {
+						headerColumn++
+						headerActivated = false
+					}
+				} else if user == "" && selected < len(ids) {
+					user = ids[selected]
+					by = "id"
+					asc = false
+					selected = 0
+					scroll = 0
+				}
+			case "\r", "\n":
+				if headerFocused {
+					field := headerColumns(user)[headerColumn].field
+					if headerActivated && field == by {
+						asc = !asc
+					} else {
+						by = field
+						asc = false
+					}
+					headerActivated = true
+					selected = 0
+					scroll = 0
+				} else if user == "" && selected < len(ids) {
 					user = ids[selected]
 					by = "id"
 					asc = false
@@ -397,7 +448,12 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					scroll = 0
 				}
 			case "left":
-				if user != "" {
+				if headerFocused {
+					if headerColumn > 0 {
+						headerColumn--
+						headerActivated = false
+					}
+				} else if user != "" {
 					user = ""
 					by = initialSort
 					selected = 0
@@ -425,6 +481,13 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				if ev.y == headerY {
 					field := headerSort(ev.x, user)
 					if field != "" {
+						for i, column := range headerColumns(user) {
+							if column.field == field {
+								headerColumn = i
+								break
+							}
+						}
+						headerFocused, headerActivated = true, true
 						if field == by {
 							asc = !asc
 						} else {
@@ -436,10 +499,12 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					}
 				}
 				if ev.y > headerY && ev.y < height {
+					headerFocused, headerActivated = false, false
 					selected = scroll + ev.y - headerY - 1
 				}
 			default:
 				if ev.wheel != 0 {
+					headerFocused, headerActivated = false, false
 					selected += ev.wheel
 				} else {
 					continue

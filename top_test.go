@@ -69,6 +69,13 @@ func TestTypesAndJobSorting(t *testing.T) {
 	if headerSort(5, "") != "user" || headerSort(40, "") != "gpu" || headerSort(20, "a") != "account" {
 		t.Fatal("header columns")
 	}
+	userColumns, jobColumns := headerColumns(""), headerColumns("a")
+	if len(userColumns) != 5 || len(jobColumns) != 7 || jobColumns[6].field != "name" {
+		t.Fatalf("columns: %v %v", userColumns, jobColumns)
+	}
+	if got := highlightHeader("USER            JOBS", userColumns[1]); got != "USER            \x1b[7mJOBS\x1b[0m" {
+		t.Fatalf("highlight: %q", got)
+	}
 }
 func TestMouseAndArrows(t *testing.T) {
 	in, out, e := os.Pipe()
