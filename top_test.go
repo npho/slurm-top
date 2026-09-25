@@ -73,7 +73,7 @@ func TestTypesAndJobSorting(t *testing.T) {
 		t.Fatal("header columns")
 	}
 	userColumns, jobColumns := headerColumns(""), headerColumns("a")
-	if len(userColumns) != 9 || len(jobColumns) != 8 || userColumns[5].field != "pending-jobs" || jobColumns[7].field != "name" {
+	if len(userColumns) != 13 || len(jobColumns) != 10 || userColumns[7].field != "pending-jobs" || jobColumns[9].field != "name" {
 		t.Fatalf("columns: %v %v", userColumns, jobColumns)
 	}
 	if got := highlightHeader(userHeader("gpu", false), userColumns[1]); !strings.Contains(got, "\x1b[7mRUN") {
@@ -99,6 +99,18 @@ func TestJobProgressAndBar(t *testing.T) {
 	selected := "\x1b[7m" + fitANSI(progressBar(50, 10, true)+"  remainder", 30) + "\x1b[0m"
 	if !strings.Contains(selected, "remainder") || strings.Contains(selected, "\x1b[0m░") {
 		t.Fatalf("selected progress row = %q", selected)
+	}
+}
+
+func TestResourceRatios(t *testing.T) {
+	if got := cpuGPU(8, 2); got != "4.0" {
+		t.Fatalf("CPU/GPU = %s", got)
+	}
+	if got := memoryCPU(16384, 8); got != "2.1" {
+		t.Fatalf("memory/CPU = %s", got)
+	}
+	if got := cpuGPU(8, 0); got != "-" {
+		t.Fatalf("CPU/GPU with zero GPUs = %s", got)
 	}
 }
 

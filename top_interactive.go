@@ -103,7 +103,22 @@ func sortJobs(jobs []Job, by string, asc bool) {
 			cmp = strings.Compare(a.QoS, b.QoS)
 		case "progress":
 			cmp = a.Progress - b.Progress
+		case "cpu-gpu":
+			left, right := ratioSortValue(a.CPUs, a.GPUs), ratioSortValue(b.CPUs, b.GPUs)
+			if left < right {
+				cmp = -1
+			} else if left > right {
+				cmp = 1
+			}
+		case "memory-cpu":
+			left, right := ratioSortValue(a.MemoryMB, a.CPUs), ratioSortValue(b.MemoryMB, b.CPUs)
+			if left < right {
+				cmp = -1
+			} else if left > right {
+				cmp = 1
+			}
 		case "cpu":
+
 			cmp = a.CPUs - b.CPUs
 		case "gpu":
 			cmp = a.GPUs - b.GPUs
@@ -145,7 +160,7 @@ func topRows(s Snapshot, user, by string, asc bool, color ...bool) ([]string, []
 		ids := make([]string, 0, len(users))
 		for _, u := range users {
 			ids = append(ids, u.User)
-			lines = append(lines, fmt.Sprintf("%-16.16s %6d %6d %6d %6s  %6d %6d %6d %6s", u.User, u.RunningJobs, u.GPUs, u.CPUs, gb(u.MemoryMB), u.PendingJobs, u.PendingGPUs, u.PendingCPUs, gb(u.PendingMemoryMB)))
+			lines = append(lines, fmt.Sprintf("%-16.16s %6d %6d %6d %6s %6s %6s  %6d %6d %6d %6s %6s %6s", u.User, u.RunningJobs, u.GPUs, u.CPUs, cpuGPU(u.CPUs, u.GPUs), gb(u.MemoryMB), memoryCPU(u.MemoryMB, u.CPUs), u.PendingJobs, u.PendingGPUs, u.PendingCPUs, cpuGPU(u.PendingCPUs, u.PendingGPUs), gb(u.PendingMemoryMB), memoryCPU(u.PendingMemoryMB, u.PendingCPUs)))
 		}
 		return []string{userHeader(by, asc)}, lines, ids
 	}
@@ -160,7 +175,7 @@ func topRows(s Snapshot, user, by string, asc bool, color ...bool) ([]string, []
 	ids := make([]string, 0, len(jobs))
 	for _, j := range jobs {
 		ids = append(ids, strconv.Itoa(j.ID)+"/"+j.State)
-		lines = append(lines, fmt.Sprintf("%-11d %-14.14s %-10.10s %-10s %8d %8d %10s  %s", j.ID, j.Account, j.QoS, progressBar(j.Progress, 10, colorEnabled), j.GPUs, j.CPUs, gb(j.MemoryMB), j.Name))
+		lines = append(lines, fmt.Sprintf("%-11d %-14.14s %-10.10s %-10s %8d %8d %8s %10s %10s  %s", j.ID, j.Account, j.QoS, progressBar(j.Progress, 10, colorEnabled), j.GPUs, j.CPUs, cpuGPU(j.CPUs, j.GPUs), gb(j.MemoryMB), memoryCPU(j.MemoryMB, j.CPUs), j.Name))
 	}
 	header := strings.Join([]string{
 		leftHeader("JOB ID", "id", by, asc, 11),
@@ -169,7 +184,9 @@ func topRows(s Snapshot, user, by string, asc bool, color ...bool) ([]string, []
 		leftHeader("PROGRESS", "progress", by, asc, 10),
 		leftHeader("GPU", "gpu", by, asc, 8),
 		leftHeader("CPU", "cpu", by, asc, 8),
+		leftHeader("C:G", "cpu-gpu", by, asc, 8),
 		leftHeader("MEM", "mem", by, asc, 10),
+		leftHeader("M:C", "memory-cpu", by, asc, 10),
 		leftHeader("NAME", "name", by, asc, 20),
 	}, " ")
 	return []string{header}, lines, ids
@@ -184,13 +201,15 @@ func headerColumns(user string) []headerColumn {
 	if user == "" {
 		return []headerColumn{
 			{"user", 1, 16}, {"jobs", 18, 23}, {"gpu", 25, 30}, {"cpu", 32, 37},
-			{"mem", 39, 44}, {"pending-jobs", 48, 53}, {"pending-gpu", 55, 60},
-			{"pending-cpu", 62, 67}, {"pending-mem", 69, 74},
+			{"cpu-gpu", 39, 44}, {"mem", 46, 51}, {"memory-cpu", 53, 58}, {"pending-jobs", 62, 67},
+			{"pending-gpu", 69, 74}, {"pending-cpu", 76, 81}, {"pending-cpu-gpu", 83, 88},
+			{"pending-mem", 90, 95}, {"pending-memory-cpu", 97, 102},
 		}
 	}
 	return []headerColumn{
 		{"id", 1, 11}, {"account", 13, 26}, {"qos", 28, 37}, {"progress", 39, 48},
-		{"gpu", 50, 57}, {"cpu", 59, 66}, {"mem", 68, 77}, {"name", 80, 9999},
+		{"gpu", 50, 57}, {"cpu", 59, 66}, {"cpu-gpu", 68, 75}, {"mem", 77, 86},
+		{"memory-cpu", 88, 97}, {"name", 100, 9999},
 	}
 }
 

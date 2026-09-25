@@ -218,9 +218,38 @@ func gpuTypeCounts(tres string, h200, mig, other *int) {
 		*other += gpuFromTRES(tres)
 	}
 }
+func ratioSortValue(numerator, denominator int) float64 {
+	if denominator <= 0 {
+		return -1
+	}
+	return float64(numerator) / float64(denominator)
+}
+
 func sortUsers(users []Usage, by string) {
 	sort.Slice(users, func(i, j int) bool {
 		a, b := users[i], users[j]
+		switch by {
+		case "cpu-gpu":
+			left, right := ratioSortValue(a.CPUs, a.GPUs), ratioSortValue(b.CPUs, b.GPUs)
+			if left != right {
+				return left > right
+			}
+		case "memory-cpu":
+			left, right := ratioSortValue(a.MemoryMB, a.CPUs), ratioSortValue(b.MemoryMB, b.CPUs)
+			if left != right {
+				return left > right
+			}
+		case "pending-cpu-gpu":
+			left, right := ratioSortValue(a.PendingCPUs, a.PendingGPUs), ratioSortValue(b.PendingCPUs, b.PendingGPUs)
+			if left != right {
+				return left > right
+			}
+		case "pending-memory-cpu":
+			left, right := ratioSortValue(a.PendingMemoryMB, a.PendingCPUs), ratioSortValue(b.PendingMemoryMB, b.PendingCPUs)
+			if left != right {
+				return left > right
+			}
+		}
 		var left, right int
 		switch by {
 		case "cpu":
@@ -237,6 +266,8 @@ func sortUsers(users []Usage, by string) {
 			left, right = a.PendingGPUs, b.PendingGPUs
 		case "pending-jobs":
 			left, right = a.PendingJobs, b.PendingJobs
+		case "cpu-gpu", "memory-cpu", "pending-cpu-gpu", "pending-memory-cpu":
+			// Ratio ties fall back to username below.
 		case "user":
 			return a.User < b.User
 		default:
@@ -270,20 +301,37 @@ func leftHeader(label, field, by string, asc bool, width int) string {
 	return label + strings.Repeat(" ", padding)
 }
 
+func ratioDecimal(numerator float64, denominator int) string {
+	if denominator <= 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.1f", numerator/float64(denominator))
+}
+
+func cpuGPU(cpus, gpus int) string { return ratioDecimal(float64(cpus), gpus) }
+func memoryCPU(memoryMiB, cpus int) string {
+	return ratioDecimal(float64(memoryMiB)*1_048_576/1_000_000_000, cpus)
+}
+
 func userHeader(by string, asc bool) string {
 	return strings.Join([]string{
 		leftHeader("USER", "user", by, asc, 16),
 		leftHeader("RUN", "jobs", by, asc, 6),
 		leftHeader("GPU", "gpu", by, asc, 6),
 		leftHeader("CPU", "cpu", by, asc, 6),
+		leftHeader("C:G", "cpu-gpu", by, asc, 6),
 		leftHeader("MEM", "mem", by, asc, 6),
+		leftHeader("M:C", "memory-cpu", by, asc, 6),
 		" ",
 		leftHeader("PEND", "pending-jobs", by, asc, 6),
 		leftHeader("GPU", "pending-gpu", by, asc, 6),
 		leftHeader("CPU", "pending-cpu", by, asc, 6),
+		leftHeader("C:G", "pending-cpu-gpu", by, asc, 6),
 		leftHeader("MEM", "pending-mem", by, asc, 6),
+		leftHeader("M:C", "pending-memory-cpu", by, asc, 6),
 	}, " ")
 }
+
 func collectTop(ctx context.Context) (Snapshot, error) {
 	// Sequential calls avoid doubling controller load when many people use watch.
 	data, e := collect(ctx)
@@ -324,7 +372,7 @@ func topLines(s Snapshot, by string, width int) []string {
 		userHeader(by, false),
 	}
 	for _, u := range users {
-		lines = append(lines, fmt.Sprintf("%-16.16s %6d %6d %6d %6s  %6d %6d %6d %6s", u.User, u.RunningJobs, u.GPUs, u.CPUs, gb(u.MemoryMB), u.PendingJobs, u.PendingGPUs, u.PendingCPUs, gb(u.PendingMemoryMB)))
+		lines = append(lines, fmt.Sprintf("%-16.16s %6d %6d %6d %6s %6s %6s  %6d %6d %6d %6s %6s %6s", u.User, u.RunningJobs, u.GPUs, u.CPUs, cpuGPU(u.CPUs, u.GPUs), gb(u.MemoryMB), memoryCPU(u.MemoryMB, u.CPUs), u.PendingJobs, u.PendingGPUs, u.PendingCPUs, cpuGPU(u.PendingCPUs, u.PendingGPUs), gb(u.PendingMemoryMB), memoryCPU(u.PendingMemoryMB, u.PendingCPUs)))
 	}
 	if len(users) == 0 {
 		lines = append(lines, "No running or pending jobs.")
