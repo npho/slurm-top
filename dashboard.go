@@ -16,18 +16,34 @@ func fit(s string, width int) string {
 	}
 	return s + strings.Repeat(" ", width-len(r))
 }
-func bar(used, total, width int) string {
-	if total <= 0 {
-		return strings.Repeat("?", width)
-	}
+
+var partialBlocks = []string{"", "▏", "▎", "▍", "▌", "▋", "▊", "▉"}
+
+// barParts represents each terminal cell in eighths, the finest horizontal
+// resolution available with standard Unicode block glyphs.
+func barParts(used, total, width int) (full int, partial string, empty int) {
 	if used < 0 {
 		used = 0
 	}
 	if used > total {
 		used = total
 	}
-	filled := (used*width + total/2) / total
-	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+	units := (used*width*8 + total/2) / total
+	full, remainder := units/8, units%8
+	partial = partialBlocks[remainder]
+	empty = width - full
+	if partial != "" {
+		empty--
+	}
+	return full, partial, empty
+}
+
+func bar(used, total, width int) string {
+	if total <= 0 {
+		return strings.Repeat("?", width)
+	}
+	full, partial, empty := barParts(used, total, width)
+	return strings.Repeat("█", full) + partial + strings.Repeat("░", empty)
 }
 func tint(s, code string, enabled bool) string {
 	if !enabled {

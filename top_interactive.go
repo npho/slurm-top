@@ -141,9 +141,9 @@ func progressBar(percent, width int, color bool) string {
 	if !color || percent <= 0 {
 		return plain
 	}
-	filled := (min(100, percent)*width + 50) / 100
+	full, partial, empty := barParts(percent, 100, width)
 	// Restore the default foreground without clearing a selected row's reverse-video background.
-	return "\x1b[32m" + strings.Repeat("█", filled) + "\x1b[39m" + strings.Repeat("░", width-filled)
+	return "\x1b[32m" + strings.Repeat("█", full) + partial + "\x1b[39m" + strings.Repeat("░", empty)
 }
 
 func topRows(s Snapshot, user, by string, asc bool, color ...bool) ([]string, []string, []string) {
