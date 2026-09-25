@@ -141,9 +141,9 @@ func progressBar(percent, width int, color bool) string {
 	if !color || percent <= 0 {
 		return plain
 	}
-	full, partial, empty := barParts(percent, 100, width)
+	filled := (min(100, percent)*width + 50) / 100
 	// Restore the default foreground without clearing a selected row's reverse-video background.
-	return "\x1b[32m" + strings.Repeat("█", full) + partial + "\x1b[39m" + strings.Repeat("░", empty)
+	return "\x1b[32m" + strings.Repeat("█", filled) + "\x1b[39m" + strings.Repeat("░", width-filled)
 }
 
 type tableColumn struct {

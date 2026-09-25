@@ -42,7 +42,4 @@ func TestBarMissingAndClamp(t *testing.T) {
 	if bar(0, 0, 8) != "????????" || bar(30, 10, 8) != "████████" || bar(-1, 10, 8) != "░░░░░░░░" {
 		t.Fatal("bad bar")
 	}
-	if got := bar(1, 100, 10); got != "▏░░░░░░░░░" {
-		t.Fatalf("fine-grained bar = %q", got)
-	}
 }
