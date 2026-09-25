@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,14 +15,23 @@ import (
 	"unicode/utf8"
 )
 
+type slurmTime struct {
+	Set      bool  `json:"set"`
+	Infinite bool  `json:"infinite"`
+	Number   int64 `json:"number"`
+}
+
 type jobRecord struct {
-	ID        int      `json:"job_id"`
-	Account   string   `json:"account"`
-	Name      string   `json:"name"`
-	User      string   `json:"user_name"`
-	State     []string `json:"job_state"`
-	Alloc     string   `json:"tres_alloc_str"`
-	Requested string   `json:"tres_req_str"`
+	ID        int       `json:"job_id"`
+	Account   string    `json:"account"`
+	QoS       string    `json:"qos"`
+	Name      string    `json:"name"`
+	User      string    `json:"user_name"`
+	State     []string  `json:"job_state"`
+	StartTime slurmTime `json:"start_time"`
+	EndTime   slurmTime `json:"end_time"`
+	Alloc     string    `json:"tres_alloc_str"`
+	Requested string    `json:"tres_req_str"`
 }
 type queueResponse struct {
 	Jobs []jobRecord `json:"jobs"`
@@ -30,8 +40,10 @@ type Job struct {
 	ID       int    `json:"id"`
 	User     string `json:"user"`
 	Account  string `json:"account"`
+	QoS      string `json:"qos"`
 	Name     string `json:"name"`
 	State    string `json:"state"`
+	Progress int    `json:"progress_percent"`
 	CPUs     int    `json:"cpus"`
 	GPUs     int    `json:"gpus"`
 	MemoryMB int    `json:"memory_mb"`
@@ -101,6 +113,14 @@ func memoryMB(s string) int {
 	}
 	return int(v*mult + 0.5)
 }
+func jobProgress(state []string, start, end slurmTime, at time.Time) int {
+	if !slices.Contains(state, "RUNNING") || !start.Set || !end.Set || start.Infinite || end.Infinite || end.Number <= start.Number {
+		return 0
+	}
+	progress := int((at.Unix() - start.Number) * 100 / (end.Number - start.Number))
+	return min(100, max(0, progress))
+}
+
 func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 	var response queueResponse
 	if err := json.Unmarshal(data, &response); err != nil {
@@ -132,6 +152,7 @@ func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 		}
 		j.User = printable(j.User)
 		j.Account = printable(j.Account)
+		j.QoS = printable(j.QoS)
 		j.Name = printable(j.Name)
 		u := users[j.User]
 		if u == nil {
@@ -147,14 +168,14 @@ func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 			u.GPUs += gpuFromTRES(j.Alloc)
 			u.MemoryMB += memoryMB(tresValue(j.Alloc, "mem"))
 			gpuTypeCounts(j.Alloc, &snap.H200Allocated, &snap.MIGAllocated, &snap.OtherGPUAllocated)
-			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, Name: j.Name, State: "RUNNING", CPUs: number(tresValue(j.Alloc, "cpu")), GPUs: gpuFromTRES(j.Alloc), MemoryMB: memoryMB(tresValue(j.Alloc, "mem"))})
+			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Name: j.Name, State: "RUNNING", Progress: jobProgress(j.State, j.StartTime, j.EndTime, at), CPUs: number(tresValue(j.Alloc, "cpu")), GPUs: gpuFromTRES(j.Alloc), MemoryMB: memoryMB(tresValue(j.Alloc, "mem"))})
 		} else {
 			u.PendingJobs++
 			snap.PendingJobs++
 			u.PendingCPUs += number(tresValue(j.Requested, "cpu"))
 			u.PendingGPUs += gpuFromTRES(j.Requested)
 			u.PendingMemoryMB += memoryMB(tresValue(j.Requested, "mem"))
-			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, Name: j.Name, State: "PENDING", CPUs: number(tresValue(j.Requested, "cpu")), GPUs: gpuFromTRES(j.Requested), MemoryMB: memoryMB(tresValue(j.Requested, "mem"))})
+			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Name: j.Name, State: "PENDING", CPUs: number(tresValue(j.Requested, "cpu")), GPUs: gpuFromTRES(j.Requested), MemoryMB: memoryMB(tresValue(j.Requested, "mem"))})
 		}
 	}
 	for _, u := range users {

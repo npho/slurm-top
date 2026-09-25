@@ -99,8 +99,10 @@ func sortJobs(jobs []Job, by string, asc bool) {
 			cmp = strings.Compare(a.Account, b.Account)
 		case "name":
 			cmp = strings.Compare(a.Name, b.Name)
-		case "state":
-			cmp = strings.Compare(a.State, b.State)
+		case "qos":
+			cmp = strings.Compare(a.QoS, b.QoS)
+		case "progress":
+			cmp = a.Progress - b.Progress
 		case "cpu":
 			cmp = a.CPUs - b.CPUs
 		case "gpu":
@@ -119,7 +121,17 @@ func sortJobs(jobs []Job, by string, asc bool) {
 		return cmp > 0
 	})
 }
-func topRows(s Snapshot, user, by string, asc bool) ([]string, []string, []string) {
+func progressBar(percent, width int, color bool) string {
+	plain := bar(percent, 100, width)
+	if !color || percent <= 0 {
+		return plain
+	}
+	filled := (min(100, percent)*width + 50) / 100
+	return "\x1b[32m" + strings.Repeat("█", filled) + "\x1b[0m" + strings.Repeat("░", width-filled)
+}
+
+func topRows(s Snapshot, user, by string, asc bool, color ...bool) ([]string, []string, []string) {
+	colorEnabled := len(color) > 0 && color[0]
 	if user == "" {
 		users := append([]Usage(nil), s.Users...)
 		sortUsers(users, by)
@@ -147,12 +159,13 @@ func topRows(s Snapshot, user, by string, asc bool) ([]string, []string, []strin
 	ids := make([]string, 0, len(jobs))
 	for _, j := range jobs {
 		ids = append(ids, strconv.Itoa(j.ID)+"/"+j.State)
-		lines = append(lines, fmt.Sprintf("%-11d %-14.14s %-8s %8d %8d %10s  %s", j.ID, j.Account, j.State, j.CPUs, j.GPUs, gb(j.MemoryMB), j.Name))
+		lines = append(lines, fmt.Sprintf("%-11d %-14.14s %-10.10s %-10s %8d %8d %10s  %s", j.ID, j.Account, j.QoS, progressBar(j.Progress, 10, colorEnabled), j.CPUs, j.GPUs, gb(j.MemoryMB), j.Name))
 	}
 	header := strings.Join([]string{
 		leftHeader("JOB ID", "id", by, asc, 11),
 		leftHeader("ACCOUNT", "account", by, asc, 14),
-		leftHeader("STATE", "state", by, asc, 8),
+		leftHeader("QOS", "qos", by, asc, 10),
+		leftHeader("PROGRESS", "progress", by, asc, 10),
 		leftHeader("CPU", "cpu", by, asc, 8),
 		leftHeader("GPU", "gpu", by, asc, 8),
 		leftHeader("MEM", "mem", by, asc, 10),
@@ -175,8 +188,8 @@ func headerColumns(user string) []headerColumn {
 		}
 	}
 	return []headerColumn{
-		{"id", 1, 11}, {"account", 13, 26}, {"state", 28, 35},
-		{"cpu", 37, 44}, {"gpu", 46, 53}, {"mem", 55, 64}, {"name", 67, 9999},
+		{"id", 1, 11}, {"account", 13, 26}, {"qos", 28, 37}, {"progress", 39, 48},
+		{"cpu", 50, 57}, {"gpu", 59, 66}, {"mem", 68, 77}, {"name", 80, 9999},
 	}
 }
 
@@ -343,7 +356,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 		if rows < 1 {
 			rows = 1
 		}
-		headers, items, rowIDs := topRows(s, user, by, asc)
+		headers, items, rowIDs := topRows(s, user, by, asc, colorBars)
 		ids = rowIDs
 		columns := headerColumns(user)
 		if headerColumn >= len(columns) {
