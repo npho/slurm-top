@@ -65,7 +65,7 @@ func card(n Node, width int, color bool) []string {
 		content = append(content, "GPU -")
 	}
 	content = append(content, fmt.Sprintf("CPU alloc %s %d/%d", bar(n.CPUAllocated, n.CPUTotal, 8), n.CPUAllocated, n.CPUTotal))
-	content = append(content, fmt.Sprintf("Mem alloc %s %s/%s GiB", bar(n.MemoryAllocatedMB, n.MemoryTotalMB, 8), gib(n.MemoryAllocatedMB), gib(n.MemoryTotalMB)))
+	content = append(content, fmt.Sprintf("Mem alloc %s %s/%s GB", bar(n.MemoryAllocatedMB, n.MemoryTotalMB, 8), gb(n.MemoryAllocatedMB), gb(n.MemoryTotalMB)))
 	if n.MemoryUsedApproxMB != nil {
 		content = append(content, fmt.Sprintf("Mem used~ %s %.0f%%", bar(*n.MemoryUsedApproxMB, n.MemoryTotalMB, 8), float64(*n.MemoryUsedApproxMB)*100/float64(n.MemoryTotalMB)))
 	} else {

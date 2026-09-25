@@ -33,6 +33,14 @@ func TestTypedCountsAndMissingMetrics(t *testing.T) {
 		t.Fatalf("nodes: %+v", nodes)
 	}
 }
+func TestGBRoundsMiBToNearestDecimalGB(t *testing.T) {
+	for mib, want := range map[int]string{0: "0", 476: "0", 477: "1", 1024: "1", 1536: "2"} {
+		if got := gb(mib); got != want {
+			t.Errorf("gb(%d) = %s, want %s", mib, got, want)
+		}
+	}
+}
+
 func TestRenderAndArgs(t *testing.T) {
 	var out bytes.Buffer
 	n := parseNodes("NodeName=x State=IDLE Gres=gpu:2 CPUTot=4", false)

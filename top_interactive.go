@@ -132,9 +132,9 @@ func topRows(s Snapshot, user, by string, asc bool) ([]string, []string, []strin
 		ids := make([]string, 0, len(users))
 		for _, u := range users {
 			ids = append(ids, u.User)
-			lines = append(lines, fmt.Sprintf("%-16.16s %4d/%-4d %9d %9d %11s  %d/%d/%s", u.User, u.RunningJobs, u.PendingJobs, u.CPUs, u.GPUs, gib(u.MemoryMB), u.PendingCPUs, u.PendingGPUs, gib(u.PendingMemoryMB)))
+			lines = append(lines, fmt.Sprintf("%-16.16s %4d/%-4d %9d %9d %11s  %d/%d/%s", u.User, u.RunningJobs, u.PendingJobs, u.CPUs, u.GPUs, gb(u.MemoryMB), u.PendingCPUs, u.PendingGPUs, gb(u.PendingMemoryMB)))
 		}
-		return []string{"USER            JOBS R/P  CPU alloc GPU alloc MEM GiB     PENDING CPU/GPU/MEM GiB"}, lines, ids
+		return []string{"USER            JOBS R/P  CPU alloc GPU alloc  MEM GB     PENDING CPU/GPU/MEM GB"}, lines, ids
 	}
 	jobs := []Job{}
 	for _, j := range s.Jobs {
@@ -147,9 +147,9 @@ func topRows(s Snapshot, user, by string, asc bool) ([]string, []string, []strin
 	ids := make([]string, 0, len(jobs))
 	for _, j := range jobs {
 		ids = append(ids, strconv.Itoa(j.ID)+"/"+j.State)
-		lines = append(lines, fmt.Sprintf("%-11d %-14.14s %-8s %8d %8d %10s  %s", j.ID, j.Account, j.State, j.CPUs, j.GPUs, gib(j.MemoryMB), j.Name))
+		lines = append(lines, fmt.Sprintf("%-11d %-14.14s %-8s %8d %8d %10s  %s", j.ID, j.Account, j.State, j.CPUs, j.GPUs, gb(j.MemoryMB), j.Name))
 	}
-	return []string{"JOB ID      ACCOUNT        STATE    CPU req  GPU req  MEM GiB     NAME"}, lines, ids
+	return []string{"JOB ID      ACCOUNT        STATE    CPU req  GPU req   MEM GB     NAME"}, lines, ids
 }
 func headerSort(x int, user string) string {
 	if user == "" {
@@ -249,7 +249,7 @@ func horizontalBars(s Snapshot, width int, colored ...bool) []string {
 		return fmt.Sprintf("%s %s %d/%d", label, coloredBar(n, total, 8, enabled), n, total)
 	}
 	c := segment("CPU", cpu, s.CapacityCPU)
-	m := fmt.Sprintf("MEM %s %s/%sGiB", coloredBar(mem, s.CapacityMemoryMB, 8, enabled), gib(mem), gib(s.CapacityMemoryMB))
+	m := fmt.Sprintf("MEM %s %s/%sGB", coloredBar(mem, s.CapacityMemoryMB, 8, enabled), gb(mem), gb(s.CapacityMemoryMB))
 	h := segment("H200", s.H200Allocated, s.H200Capacity)
 	mig := segment("H200-MIG", s.MIGAllocated, s.MIGCapacity)
 	visible := func(v string) int { return utf8.RuneCountInString(sgrPattern.ReplaceAllString(v, "")) }

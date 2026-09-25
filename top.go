@@ -257,9 +257,9 @@ func topLines(s Snapshot, by string, width int) []string {
 		fmt.Sprintf("slurm-top  %s    %d running / %d pending jobs    sort: %s", s.UpdatedAt.Format("15:04:05"), s.RunningJobs, s.PendingJobs, by),
 		fmt.Sprintf("GPU allocated  %s %d/%d", percentBar(g, s.CapacityGPU, 20), g, s.CapacityGPU),
 		fmt.Sprintf("CPU allocated  %s %d/%d", percentBar(c, s.CapacityCPU, 20), c, s.CapacityCPU),
-		fmt.Sprintf("MEM allocated  %s %s/%s GiB", percentBar(m, s.CapacityMemoryMB, 20), gib(m), gib(s.CapacityMemoryMB)),
+		fmt.Sprintf("MEM allocated  %s %s/%s GB", percentBar(m, s.CapacityMemoryMB, 20), gb(m), gb(s.CapacityMemoryMB)),
 		"Bars = allocations / cluster capacity; SHARE* = selected resource share (GPU for jobs/user). Not measured utilization.",
-		"USER             JOBS R/P  CPU alloc  GPU alloc  MEM GiB  SHARE*       PENDING CPU/GPU/MEM GiB",
+		"USER             JOBS R/P  CPU alloc  GPU alloc   MEM GB  SHARE*        PENDING CPU/GPU/MEM GB",
 	}
 	for _, u := range users {
 		value, capacity := u.GPUs, s.CapacityGPU
@@ -271,7 +271,7 @@ func topLines(s Snapshot, by string, width int) []string {
 		case "jobs", "user":
 			value, capacity = u.GPUs, s.CapacityGPU
 		}
-		lines = append(lines, fmt.Sprintf("%-16.16s %4d/%-4d %9d %10d %8s  %s   %d/%d/%s", u.User, u.RunningJobs, u.PendingJobs, u.CPUs, u.GPUs, gib(u.MemoryMB), percentBar(value, capacity, 10), u.PendingCPUs, u.PendingGPUs, gib(u.PendingMemoryMB)))
+		lines = append(lines, fmt.Sprintf("%-16.16s %4d/%-4d %9d %10d %8s  %s   %d/%d/%s", u.User, u.RunningJobs, u.PendingJobs, u.CPUs, u.GPUs, gb(u.MemoryMB), percentBar(value, capacity, 10), u.PendingCPUs, u.PendingGPUs, gb(u.PendingMemoryMB)))
 	}
 	if len(users) == 0 {
 		lines = append(lines, "No running or pending jobs.")

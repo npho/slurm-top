@@ -199,7 +199,11 @@ func ratio(a, b int) string {
 	}
 	return fmt.Sprintf("%d/%d (%.0f%%)", a, b, float64(a)*100/float64(b))
 }
-func gib(mb int) string { return fmt.Sprintf("%.1f", float64(mb)/1024) }
+
+// gb converts Slurm's MiB memory values to decimal GB, rounded to the nearest integer.
+func gb(mib int) string {
+	return strconv.FormatInt((int64(mib)*1_048_576+500_000_000)/1_000_000_000, 10)
+}
 func render(w io.Writer, nodes []Node, format string, at time.Time) error {
 	if format == "grid" {
 		return renderGrid(w, nodes, at, 100, 0, 0, false)
@@ -223,19 +227,19 @@ func render(w io.Writer, nodes []Node, format string, at time.Time) error {
 	}
 	fmt.Fprintf(w, "Slurm nodes  %s  |  GPUs %d allocated / %d total, %d on allocatable nodes\n", at.Format(time.RFC3339), alloc, total, free)
 	t := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(t, "NODE\tSTATE\tGPU TYPE\tGPU ALLOC/TOTAL\tCPU ALLOC/TOTAL\tCPU LOAD\tMEM ALLOC GiB\tMEM USED ~\tMEM FREE GiB")
+	fmt.Fprintln(t, "NODE\tSTATE\tGPU TYPE\tGPU ALLOC/TOTAL\tCPU ALLOC/TOTAL\tCPU LOAD\tMEM ALLOC GB\tMEM USED ~\tMEM FREE GB")
 	for _, n := range nodes {
 		load, mem, used := "-", "-", "-"
 		if n.CPULoad != nil {
 			load = fmt.Sprintf("%.2f", *n.CPULoad)
 		}
 		if n.MemoryFreeMB != nil {
-			mem = gib(*n.MemoryFreeMB)
+			mem = gb(*n.MemoryFreeMB)
 		}
 		if n.MemoryUsedApproxMB != nil {
-			used = fmt.Sprintf("%s GiB (%.0f%%)", gib(*n.MemoryUsedApproxMB), float64(*n.MemoryUsedApproxMB)*100/float64(n.MemoryTotalMB))
+			used = fmt.Sprintf("%s GB (%.0f%%)", gb(*n.MemoryUsedApproxMB), float64(*n.MemoryUsedApproxMB)*100/float64(n.MemoryTotalMB))
 		}
-		fmt.Fprintf(t, "%s\t%s\t%s\t%s\t%s\t%s\t%s/%s\t%s\t%s\n", n.Name, n.State, n.GPUType, ratio(n.GPUAllocated, n.GPUTotal), ratio(n.CPUAllocated, n.CPUTotal), load, gib(n.MemoryAllocatedMB), gib(n.MemoryTotalMB), used, mem)
+		fmt.Fprintf(t, "%s\t%s\t%s\t%s\t%s\t%s\t%s/%s\t%s\t%s\n", n.Name, n.State, n.GPUType, ratio(n.GPUAllocated, n.GPUTotal), ratio(n.CPUAllocated, n.CPUTotal), load, gb(n.MemoryAllocatedMB), gb(n.MemoryTotalMB), used, mem)
 	}
 	return t.Flush()
 }
