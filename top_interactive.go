@@ -405,21 +405,21 @@ func joinStatBoxes(boxes ...[]string) []string {
 }
 
 func horizontalBars(s Snapshot, width int, colored ...bool) []string {
-	cpu, mem, gpu := 0, 0, 0
+	cpu, mem := 0, 0
 	for _, u := range s.Users {
 		cpu += u.CPUs
 		mem += u.MemoryMB
-		gpu += u.GPUs
 	}
 	enabled := len(colored) > 0 && colored[0]
 	cpuInfo := usageInfo(cpu, s.CapacityCPU, strconv.Itoa(cpu), strconv.Itoa(s.CapacityCPU))
-	memInfo := usageInfo(mem, s.CapacityMemoryMB, tb(mem)+" TB", tb(s.CapacityMemoryMB)+" TB")
-	gpuUsed, gpuTotal := gpu, s.CapacityGPU
-	gpuInfo := usageInfo(gpuUsed, gpuTotal, strconv.Itoa(gpuUsed), strconv.Itoa(gpuTotal))
+	memInfo := usageInfo(mem, s.CapacityMemoryMB, tb(mem), tb(s.CapacityMemoryMB)+" TB")
+	h200Info := usageInfo(s.H200Allocated, s.H200Capacity, strconv.Itoa(s.H200Allocated), strconv.Itoa(s.H200Capacity))
+	migInfo := usageInfo(s.MIGAllocated, s.MIGCapacity, strconv.Itoa(s.MIGAllocated), strconv.Itoa(s.MIGCapacity))
 	cpuBox := statBox("CPU", coloredBar(cpu, s.CapacityCPU, visibleWidth(cpuInfo), enabled), cpuInfo)
 	memBox := statBox("MEM", coloredBar(mem, s.CapacityMemoryMB, visibleWidth(memInfo), enabled), memInfo)
-	gpuBarWidth := visibleWidth(gpuInfo)
-	gpuStatus := "H200 " + coloredBar(s.H200Allocated, s.H200Capacity, gpuBarWidth, enabled) + "  H200-MIG " + coloredBar(s.MIGAllocated, s.MIGCapacity, gpuBarWidth, enabled)
+	h200Label, migLabel := "H200 ", "H200-MIG "
+	gpuStatus := h200Label + coloredBar(s.H200Allocated, s.H200Capacity, visibleWidth(h200Info), enabled) + "  " + migLabel + coloredBar(s.MIGAllocated, s.MIGCapacity, visibleWidth(migInfo), enabled)
+	gpuInfo := strings.Repeat(" ", visibleWidth(h200Label)) + h200Info + "  " + strings.Repeat(" ", visibleWidth(migLabel)) + migInfo
 	gpuBox := statBox("GPU", gpuStatus, gpuInfo)
 	all := joinStatBoxes(cpuBox, memBox, gpuBox)
 	if width >= visibleWidth(all[0]) {
