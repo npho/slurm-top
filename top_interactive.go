@@ -154,10 +154,9 @@ type tableColumn struct {
 func renderTable(columns []tableColumn, rows [][]string, by string, asc bool) (string, []string, []headerColumn) {
 	widths := make([]int, len(columns))
 	for i, column := range columns {
-		widths[i] = utf8.RuneCountInString(column.label)
-		if sortArrow(column.field, by, asc) != "" {
-			widths[i] += 2
-		}
+		// Reserve the space and sort arrow even while inactive so selecting a
+		// column does not change the table layout.
+		widths[i] = utf8.RuneCountInString(column.label) + 2
 	}
 	for _, row := range rows {
 		for i, value := range row {
@@ -170,7 +169,7 @@ func renderTable(columns []tableColumn, rows [][]string, by string, asc bool) (s
 	for i, column := range columns {
 		headerParts[i] = leftHeader(column.label, column.field, by, asc, widths[i])
 		headerColumns[i] = headerColumn{column.field, start, start + widths[i] - 1}
-		start += widths[i] + 1
+		start += widths[i] + 2
 	}
 	lines := make([]string, len(rows))
 	for i, row := range rows {
@@ -181,9 +180,9 @@ func renderTable(columns []tableColumn, rows [][]string, by string, asc bool) (s
 			visible := utf8.RuneCountInString(sgrPattern.ReplaceAllString(value, ""))
 			parts[j] = value + strings.Repeat(" ", widths[j]-visible)
 		}
-		lines[i] = strings.Join(parts, " ")
+		lines[i] = strings.Join(parts, "  ")
 	}
-	return strings.Join(headerParts, " "), lines, headerColumns
+	return strings.Join(headerParts, "  "), lines, headerColumns
 }
 
 func topRows(s Snapshot, user, by string, asc bool, color ...bool) ([]string, []string, []string, []headerColumn) {
