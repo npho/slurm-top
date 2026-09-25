@@ -176,11 +176,10 @@ func renderTable(columns []tableColumn, rows [][]string, by string, asc bool) (s
 	for i, row := range rows {
 		parts := make([]string, len(row))
 		for j, value := range row {
-			if strings.Contains(value, "\x1b[") {
-				parts[j] = fitANSI(value, widths[j])
-			} else {
-				parts[j] = value + strings.Repeat(" ", widths[j]-utf8.RuneCountInString(value))
-			}
+			// Do not reset ANSI state between cells: a reset here would cancel
+			// the reverse-video background of a selected row after its progress bar.
+			visible := utf8.RuneCountInString(sgrPattern.ReplaceAllString(value, ""))
+			parts[j] = value + strings.Repeat(" ", widths[j]-visible)
 		}
 		lines[i] = strings.Join(parts, " ")
 	}

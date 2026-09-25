@@ -100,6 +100,10 @@ func TestJobProgressAndBar(t *testing.T) {
 	if !strings.Contains(selected, "remainder") || strings.Contains(selected, "\x1b[0m░") {
 		t.Fatalf("selected progress row = %q", selected)
 	}
+	_, lines, _ := renderTable([]tableColumn{{"progress", "PROGRESS"}, {"name", "NAME"}}, [][]string{{progressBar(50, 10, true), "remainder"}}, "", false)
+	if strings.Contains(lines[0], "\x1b[0m") || !strings.Contains(lines[0], "remainder") {
+		t.Fatalf("table row resets selection: %q", lines[0])
+	}
 }
 
 func TestResourceRatios(t *testing.T) {
