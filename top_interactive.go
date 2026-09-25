@@ -370,25 +370,62 @@ func fitANSI(s string, width int) string {
 
 var sgrPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
+func visibleWidth(s string) int { return utf8.RuneCountInString(sgrPattern.ReplaceAllString(s, "")) }
+
+func usageInfo(used, total int, usedText, totalText string) string {
+	percent := 0.0
+	if total > 0 {
+		percent = float64(used) * 100 / float64(total)
+	}
+	percentText := fmt.Sprintf("%.1f", percent)
+	percentText = strings.TrimSuffix(percentText, ".0")
+	return "\x1b[1m" + percentText + "%\x1b[0m  " + usedText + "/" + totalText
+}
+
+func statBox(label, status, info string) []string {
+	inner := max(visibleWidth(status), visibleWidth(info))
+	return []string{
+		"╭─ " + label + " " + strings.Repeat("─", max(0, inner-visibleWidth(label)-3)) + "╮",
+		"│" + fitANSI(status, inner) + "│",
+		"│" + fitANSI(info, inner) + "│",
+		"╰" + strings.Repeat("─", inner) + "╯",
+	}
+}
+
+func joinStatBoxes(boxes ...[]string) []string {
+	lines := make([]string, 0, len(boxes[0]))
+	for row := range boxes[0] {
+		parts := make([]string, len(boxes))
+		for i, box := range boxes {
+			parts[i] = box[row]
+		}
+		lines = append(lines, strings.Join(parts, "  "))
+	}
+	return lines
+}
+
 func horizontalBars(s Snapshot, width int, colored ...bool) []string {
-	cpu, mem := 0, 0
+	cpu, mem, gpu := 0, 0, 0
 	for _, u := range s.Users {
 		cpu += u.CPUs
 		mem += u.MemoryMB
+		gpu += u.GPUs
 	}
 	enabled := len(colored) > 0 && colored[0]
-	segment := func(label string, n, total int) string {
-		return fmt.Sprintf("%s %s %d/%d", label, coloredBar(n, total, 8, enabled), n, total)
+	cpuInfo := usageInfo(cpu, s.CapacityCPU, strconv.Itoa(cpu), strconv.Itoa(s.CapacityCPU))
+	memInfo := usageInfo(mem, s.CapacityMemoryMB, tb(mem)+" TB", tb(s.CapacityMemoryMB)+" TB")
+	gpuUsed, gpuTotal := gpu, s.CapacityGPU
+	gpuInfo := usageInfo(gpuUsed, gpuTotal, strconv.Itoa(gpuUsed), strconv.Itoa(gpuTotal))
+	cpuBox := statBox("CPU", coloredBar(cpu, s.CapacityCPU, visibleWidth(cpuInfo), enabled), cpuInfo)
+	memBox := statBox("MEM", coloredBar(mem, s.CapacityMemoryMB, visibleWidth(memInfo), enabled), memInfo)
+	gpuBarWidth := visibleWidth(gpuInfo)
+	gpuStatus := "H200 " + coloredBar(s.H200Allocated, s.H200Capacity, gpuBarWidth, enabled) + "  H200-MIG " + coloredBar(s.MIGAllocated, s.MIGCapacity, gpuBarWidth, enabled)
+	gpuBox := statBox("GPU", gpuStatus, gpuInfo)
+	all := joinStatBoxes(cpuBox, memBox, gpuBox)
+	if width >= visibleWidth(all[0]) {
+		return all
 	}
-	c := segment("CPU", cpu, s.CapacityCPU)
-	m := fmt.Sprintf("MEM %s %s/%s TB", coloredBar(mem, s.CapacityMemoryMB, 8, enabled), tb(mem), tb(s.CapacityMemoryMB))
-	h := segment("H200", s.H200Allocated, s.H200Capacity)
-	mig := segment("H200-MIG", s.MIGAllocated, s.MIGCapacity)
-	visible := func(v string) int { return utf8.RuneCountInString(sgrPattern.ReplaceAllString(v, "")) }
-	if width >= visible(c)+visible(m)+visible(h)+visible(mig)+6 {
-		return []string{c + "  " + m + "  " + h + "  " + mig}
-	}
-	return []string{c + "  " + m, h + "  " + mig}
+	return append(joinStatBoxes(cpuBox, memBox), gpuBox...)
 }
 func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort string) error {
 	if !term.IsTerminal(int(in.Fd())) || !term.IsTerminal(int(out.Fd())) || os.Getenv("TERM") == "dumb" {

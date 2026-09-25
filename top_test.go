@@ -178,19 +178,19 @@ func TestBarColors(t *testing.T) {
 func TestHorizontalBars(t *testing.T) {
 	s := Snapshot{CapacityCPU: 64, CapacityMemoryMB: 65536, H200Capacity: 8, MIGCapacity: 56, H200Allocated: 4, MIGAllocated: 12, Users: []Usage{{CPUs: 32, MemoryMB: 32768}}}
 	wide := horizontalBars(s, 180)
-	if len(wide) != 1 || !strings.Contains(wide[0], "CPU") || !strings.Contains(wide[0], "MEM") || !strings.Contains(wide[0], "H200-MIG") {
+	if len(wide) != 4 || !strings.Contains(wide[0], "CPU") || !strings.Contains(wide[0], "MEM") || !strings.Contains(wide[0], "GPU") || !strings.Contains(wide[1], "H200-MIG") {
 		t.Fatalf("wide: %v", wide)
 	}
-	narrow := horizontalBars(s, 80)
-	if len(narrow) != 2 {
+	narrow := horizontalBars(s, 40)
+	if len(narrow) != 8 {
 		t.Fatalf("narrow: %v", narrow)
 	}
-	colored := horizontalBars(s, 80, true)
-	if len(colored) != len(narrow) || !strings.Contains(colored[0], "\x1b[38;2;") {
+	colored := horizontalBars(s, 40, true)
+	if len(colored) != len(narrow) || !strings.Contains(strings.Join(colored, ""), "\x1b[38;2;") {
 		t.Fatalf("colored: %v", colored)
 	}
 	for i, line := range colored {
-		if plain := sgrPattern.ReplaceAllString(line, ""); plain != narrow[i] {
+		if plain := sgrPattern.ReplaceAllString(line, ""); plain != sgrPattern.ReplaceAllString(narrow[i], "") {
 			t.Fatalf("layout differs: %q != %q", plain, narrow[i])
 		}
 	}
