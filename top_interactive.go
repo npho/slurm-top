@@ -442,10 +442,16 @@ func horizontalBars(s Snapshot, width int, colored ...bool) []string {
 	migInfo, migUnavailable := usagePair(
 		usageValueFor(s.AllocatableMIGUsed, s.AllocatableMIG, strconv.Itoa(s.AllocatableMIGUsed), strconv.Itoa(s.AllocatableMIG), true),
 		usageValueFor(s.MIGCapacity-s.AllocatableMIG, s.MIGCapacity, strconv.Itoa(s.MIGCapacity-s.AllocatableMIG), strconv.Itoa(s.MIGCapacity), false))
-	cpuBox := statBox("CPU", coloredBar(cpu, s.AllocatableCPU, visibleWidth(cpuInfo), enabled), cpuInfo, cpuUnavailable)
-	memBox := statBox("MEM", coloredBar(mem, s.AllocatableMemoryMB, visibleWidth(memInfo), enabled), memInfo, memUnavailable)
+	cpuWidth := max(visibleWidth(cpuInfo), visibleWidth(cpuUnavailable))
+	memWidth := max(visibleWidth(memInfo), visibleWidth(memUnavailable))
+	cpuBox := statBox("CPU", coloredBar(cpu, s.AllocatableCPU, cpuWidth, enabled), cpuInfo, cpuUnavailable)
+	memBox := statBox("MEM", coloredBar(mem, s.AllocatableMemoryMB, memWidth, enabled), memInfo, memUnavailable)
+	h200Width := max(visibleWidth(h200Info), visibleWidth(h200Unavailable))
+	migWidth := max(visibleWidth(migInfo), visibleWidth(migUnavailable))
+	h200Info, h200Unavailable = fitANSI(h200Info, h200Width), fitANSI(h200Unavailable, h200Width)
+	migInfo, migUnavailable = fitANSI(migInfo, migWidth), fitANSI(migUnavailable, migWidth)
 	h200Label, migLabel := "H200 ", "H200-MIG "
-	gpuStatus := h200Label + coloredBar(s.AllocatableH200Used, s.AllocatableH200, visibleWidth(h200Info), enabled) + "  " + migLabel + coloredBar(s.AllocatableMIGUsed, s.AllocatableMIG, visibleWidth(migInfo), enabled)
+	gpuStatus := h200Label + coloredBar(s.AllocatableH200Used, s.AllocatableH200, h200Width, enabled) + "  " + migLabel + coloredBar(s.AllocatableMIGUsed, s.AllocatableMIG, migWidth, enabled)
 	gpuInfo := strings.Repeat(" ", visibleWidth(h200Label)) + h200Info + "  " + strings.Repeat(" ", visibleWidth(migLabel)) + migInfo
 	gpuUnavailable := strings.Repeat(" ", visibleWidth(h200Label)) + h200Unavailable + "  " + strings.Repeat(" ", visibleWidth(migLabel)) + migUnavailable
 	gpuBox := statBox("GPU", gpuStatus, gpuInfo, gpuUnavailable)
