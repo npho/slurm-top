@@ -85,6 +85,14 @@ func TestTypesAndJobSorting(t *testing.T) {
 		t.Fatalf("highlight after arrow: %q", got)
 	}
 }
+func TestUserJobStats(t *testing.T) {
+	s := Snapshot{Jobs: []Job{{User: "alice", Account: "a", State: "RUNNING"}, {User: "alice", Account: "b", State: "PENDING"}, {User: "alice", Account: "a", State: "PENDING"}, {User: "bob", Account: "c", State: "RUNNING"}}}
+	accounts, running, pending := userJobStats(s, "alice")
+	if accounts != 2 || running != 1 || pending != 2 {
+		t.Fatalf("stats = %d accounts / %d running / %d pending", accounts, running, pending)
+	}
+}
+
 func TestJobProgressAndBar(t *testing.T) {
 	start, end := slurmTime{Set: true, Number: 100}, slurmTime{Set: true, Number: 200}
 	if got := jobProgress([]string{"RUNNING"}, start, end, time.Unix(150, 0)); got != 50 {

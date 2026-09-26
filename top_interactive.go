@@ -469,6 +469,25 @@ func horizontalBars(s Snapshot, width int, colored ...bool) []string {
 	}
 	return append(joinStatBoxes(cpuBox, memBox), gpuBox...)
 }
+func userJobStats(s Snapshot, user string) (accounts, running, pending int) {
+	seen := map[string]struct{}{}
+	for _, job := range s.Jobs {
+		if job.User != user {
+			continue
+		}
+		if job.Account != "" {
+			seen[job.Account] = struct{}{}
+		}
+		switch job.State {
+		case "RUNNING":
+			running++
+		case "PENDING":
+			pending++
+		}
+	}
+	return len(seen), running, pending
+}
+
 func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort string) error {
 	if !term.IsTerminal(int(in.Fd())) || !term.IsTerminal(int(out.Fd())) || os.Getenv("TERM") == "dumb" {
 		return fmt.Errorf("interactive mode requires terminal stdin and stdout")
@@ -573,7 +592,8 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 		b.WriteString("\x1b[H\x1b[2J")
 		title := fmt.Sprintf("slurm-top  %s  %d users / %d accounts / %d running / %d pending", s.UpdatedAt.Format("15:04:05"), len(s.Users), s.ActiveAccounts, s.RunningJobs, s.PendingJobs)
 		if user != "" {
-			title += "  " + user
+			accounts, running, pending := userJobStats(s, user)
+			title = fmt.Sprintf("slurm-top  %s  1 user / %d accounts / %d running / %d pending  %s", s.UpdatedAt.Format("15:04:05"), accounts, running, pending, user)
 		}
 		fmt.Fprint(&b, fit(title, width-1), "\r\n")
 		for _, line := range bars {
