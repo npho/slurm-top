@@ -52,7 +52,17 @@ Show command help.
 .SH INTERACTIVE CONTROLS
 The summary initially sorts running GPUs descending. Use Up and Down, or the
 mouse wheel, to select a user. Right or Enter opens that user's job table.
-Left returns to the summary and preserves its prior sort and selected user.
+Left or Escape returns to the summary and preserves its prior sort and selected user.
+The menu shows JOBS, GPU, and NODE; the active lower-pane view is highlighted.
+The selected user's job table also uses the JOBS menu label. Tab and Shift-Tab
+cycle through JOBS, GPU, and NODE. The selected user's jobs open from JOBS with
+Right or Enter. JOBS, GPU, and NODE can also be selected by clicking their menu
+items. A horizontal rule separates the menu from the
+current view. In GPU, directional arrows select a node in the displayed grid;
+clicking a node also selects it and opens its scrollable details window. Enter
+opens the selected node's window; Escape or clicking outside it closes it, and
+the mouse wheel scrolls it. In NODE, Up and Down or the mouse wheel scroll
+long content; n and p move five rows.
 .PP
 Press Up from the first row to focus column headers. In header focus, use Left
 and Right to choose a column and Enter to sort it descending; a subsequent

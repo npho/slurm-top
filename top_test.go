@@ -21,7 +21,7 @@ func TestQueueAggregation(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if s.RunningJobs != 2 || s.PendingJobs != 1 || s.ActiveAccounts != 1 || s.CapacityGPU != 4 || len(s.Users) != 2 {
+	if s.RunningJobs != 2 || s.PendingJobs != 1 || s.ActiveAccounts != 1 || s.CapacityGPU != 4 || len(s.Users) != 2 || len(s.nodes) != 1 {
 		t.Fatalf("snapshot: %+v", s)
 	}
 	sortUsers(s.Users, "gpu")
@@ -81,7 +81,7 @@ func TestTypesAndJobSorting(t *testing.T) {
 	}
 	// The arrow in an earlier field is one terminal cell but three UTF-8 bytes.
 	// It must not move the highlighted range for a later column.
-	if got := highlightHeader(userHeader("user", false), userColumns[1]); !strings.Contains(got, "\x1b[7mRUN   \x1b[0m") {
+	if got := highlightHeader(userHeader("user", false), userColumns[1]); !strings.Contains(got, "\x1b[7mRUN   \x1b[27m") {
 		t.Fatalf("highlight after arrow: %q", got)
 	}
 }
@@ -124,6 +124,24 @@ func TestJobProgressAndBar(t *testing.T) {
 	}
 }
 
+func TestResourceColumnsAreRightJustified(t *testing.T) {
+	for _, field := range []string{"jobs", "pending-jobs", "gpu", "cpu", "cpu-gpu", "mem", "memory-cpu", "pending-gpu", "pending-cpu", "pending-cpu-gpu", "pending-mem", "pending-memory-cpu"} {
+		if !rightAlignedColumn(field) {
+			t.Errorf("%s is not right-justified", field)
+		}
+	}
+	header, rows, _ := renderTable([]tableColumn{{"memory-cpu", "M:C"}}, [][]string{{"1.0"}, {"10.0"}}, "", false)
+	if !strings.HasPrefix(header, "\x1b[1m") || !strings.HasSuffix(header, "\x1b[22m") {
+		t.Fatalf("header is not bold: %q", header)
+	}
+	if got := sgrPattern.ReplaceAllString(header, ""); got != "M:C  " {
+		t.Fatalf("header = %q, want left-justified M:C", header)
+	}
+	if rows[0] != "  1.0" || rows[1] != " 10.0" {
+		t.Fatalf("rows = %q, %q; want right-justified values", rows[0], rows[1])
+	}
+}
+
 func TestResourceRatios(t *testing.T) {
 	if got := cpuGPU(8, 2); got != "4.0" {
 		t.Fatalf("CPU/GPU = %s", got)
@@ -156,12 +174,12 @@ func TestMouseAndArrows(t *testing.T) {
 	defer in.Close()
 	events := make(chan uiEvent, 10)
 	go readTopEvents(in, events)
-	_, e = out.Write([]byte("\x1b[B\x1b[<0;40;5M\x1b[<64;40;5Mq"))
+	_, e = out.Write([]byte("\x1b[B\x1b[Z\x1b[<0;40;5M\x1b[<64;40;5Mq"))
 	out.Close()
 	if e != nil {
 		t.Fatal(e)
 	}
-	for _, want := range []string{"down", "click", "wheel", "q"} {
+	for _, want := range []string{"down", "shift-tab", "click", "wheel", "q"} {
 		ev := <-events
 		if want == "wheel" {
 			if ev.wheel != -1 {
@@ -174,6 +192,28 @@ func TestMouseAndArrows(t *testing.T) {
 		}
 	}
 }
+func TestEscapeEvent(t *testing.T) {
+	in, out, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer in.Close()
+	defer out.Close()
+	events := make(chan uiEvent, 1)
+	go readTopEvents(in, events)
+	if _, err := out.Write([]byte("\x1b")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-events:
+		if event.key != "escape" {
+			t.Fatalf("got %+v, want escape", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for escape event")
+	}
+}
+
 func TestBarColors(t *testing.T) {
 	tests := []struct {
 		n, total int
@@ -197,10 +237,75 @@ func TestUsagePairAlignment(t *testing.T) {
 	}
 }
 
+func TestTopPaneCycling(t *testing.T) {
+	columns := menuColumns()
+	if len(columns) != 3 || columns[0].field != "cluster" || columns[1].field != "gpu" || columns[2].field != "node" {
+		t.Fatalf("menu columns = %v", columns)
+	}
+	if columns[0].end >= columns[1].start || columns[1].end >= columns[2].start {
+		t.Fatalf("overlapping menu columns = %v", columns)
+	}
+	if got := cycleTopPane("cluster", false); got != "gpu" {
+		t.Fatalf("Tab from cluster = %q", got)
+	}
+	if got := cycleTopPane("gpu", true); got != "cluster" {
+		t.Fatalf("Shift-Tab from gpu = %q", got)
+	}
+	if got := cycleTopPane("node", false); got != "cluster" {
+		t.Fatalf("Tab from node = %q", got)
+	}
+	if got := cycleTopPane("user", false); got != "gpu" {
+		t.Fatalf("Tab from user = %q", got)
+	}
+	if got := cycleTopPane("user", true); got != "cluster" {
+		t.Fatalf("Shift-Tab from user = %q", got)
+	}
+}
+
+func TestNodePopup(t *testing.T) {
+	if !jobRunsOnNode("g[001-002],g010", "g002") || jobRunsOnNode("g[001-002]", "g003") {
+		t.Fatal("hostlist matching")
+	}
+	wrapped := wrapPopupText("Reason: this message wraps without truncating", 12)
+	if len(wrapped) < 2 || !strings.Contains(strings.Join(wrapped, " "), "without truncating") {
+		t.Fatalf("wrapped popup text = %q", wrapped)
+	}
+	free := 1024
+	lines := nodePopup(Node{Name: "g001", State: "MIXED", GPUType: "h200-mig", GPUTotal: 12, GPUAllocated: 10, CPUTotal: 64, CPUAllocated: 32, MemoryTotalMB: 32768, MemoryFreeMB: &free, Reason: "maintenance"}, nil, 80, 10, 0)
+	jobs := []Job{{ID: 42, User: "alice", Account: "research", State: "RUNNING", GPUs: 2, CPUs: 8, MemoryMB: 16384, nodes: "g[001-002]"}}
+	lines = nodePopup(Node{Name: "g001", State: "MIXED", GPUType: "h200-mig", GPUTotal: 12, GPUAllocated: 10, CPUTotal: 64, CPUAllocated: 32, MemoryTotalMB: 32768, MemoryAllocatedMB: 16384, MemoryFreeMB: &free, Reason: "maintenance"}, jobs, 80, 10, 0)
+	if len(lines) != 10 || !strings.Contains(strings.Join(lines, "\n"), "Node: g001 State: MIXED") || !strings.Contains(strings.Join(lines, "\n"), "maintenance") || !strings.Contains(strings.Join(lines, "\n"), "Job 42 User: alice") {
+		t.Fatalf("popup = %q", lines)
+	}
+	if visibleWidth(lines[0]) != 72 { // fixed 70-cell inner width plus borders
+		t.Fatalf("popup width = %d, want 72", visibleWidth(lines[0]))
+	}
+	scrolling := nodePopup(Node{Name: "g001", Reason: strings.Repeat("long detail ", 12)}, nil, 30, 5, 0)
+	if !strings.Contains(strings.Join(scrolling, ""), "█") || !strings.Contains(strings.Join(scrolling, ""), "░") {
+		t.Fatalf("missing popup scroll indicator: %q", scrolling)
+	}
+}
+
+func TestViewMenu(t *testing.T) {
+	menu := viewMenu("JOBS")
+	if len(menu) != 1 {
+		t.Fatalf("menu lines = %d, want 1", len(menu))
+	}
+	if got := sgrPattern.ReplaceAllString(menu[0], ""); got != " JOBS    GPU    NODE " {
+		t.Fatalf("menu labels = %q", got)
+	}
+	if !strings.Contains(menu[0], "\x1b[7m JOBS \x1b[27m") {
+		t.Fatalf("cluster is not highlighted: %q", menu)
+	}
+	if userMenu := viewMenu(paneMenuLabel("user")); !strings.Contains(userMenu[0], "\x1b[7m JOBS \x1b[27m") {
+		t.Fatalf("user jobs view is not highlighted as jobs: %q", userMenu)
+	}
+}
+
 func TestHorizontalBars(t *testing.T) {
 	s := Snapshot{CapacityCPU: 64, CapacityMemoryMB: 65536, AllocatableCPU: 64, AllocatableMemoryMB: 65536, AllocatableCPUUsed: 32, AllocatableMemoryUsedMB: 32768, H200Capacity: 8, AllocatableH200: 8, AllocatableH200Used: 4, MIGCapacity: 56, AllocatableMIG: 56, AllocatableMIGUsed: 12, H200Allocated: 4, MIGAllocated: 12, Users: []Usage{{CPUs: 32, MemoryMB: 32768}}}
 	wide := horizontalBars(s, 180)
-	if len(wide) != 5 || !strings.Contains(wide[0], "CPU") || !strings.Contains(wide[0], "MEM") || !strings.Contains(wide[0], "GPU") || !strings.Contains(wide[1], "H200-MIG") {
+	if len(wide) != 5 || !strings.Contains(wide[0], "CPU") || !strings.Contains(wide[0], "MEM") || !strings.Contains(wide[0], "GPU") || !strings.Contains(wide[1], "H200-MIG") || !strings.HasPrefix(wide[0], "╭─ GPU") {
 		t.Fatalf("wide: %v", wide)
 	}
 	narrow := horizontalBars(s, 40)

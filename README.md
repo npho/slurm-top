@@ -93,8 +93,18 @@ The default `top` UI refreshes every five seconds when attached to a terminal.
 The summary defaults to running GPU allocation descending; opening a user
 shows that user's jobs sorted by elapsed time descending. Use **Up/Down** or
 the mouse wheel to select a user, **Right** or **Enter** to open their job
-list, and **Left** to return. Returning restores the prior summary sort and
-selection.
+list, and **Left** or **Escape** to return. Returning restores the prior
+summary sort and selection. The menu shows `JOBS`, `GPU`, and `NODE`; the
+active lower-pane view is highlighted. The selected user's job table also uses
+the `JOBS` menu label. Use **Tab** and **Shift-Tab** to cycle through `JOBS`,
+`GPU`, and `NODE`. The selected user's jobs are opened from `JOBS` with
+**Right** or **Enter**. You can also click the `JOBS`, `GPU`, or `NODE` menu
+item to select it. A horizontal rule separates the menu from the
+current view. In `GPU`, directional arrows select nodes in the displayed grid;
+clicking a node also selects it and opens its scrollable details window. Press
+**Enter** to open the selected node's window; **Escape** or clicking outside it
+closes it, and the mouse wheel scrolls it. In `NODE`,
+**Up/Down** or the mouse wheel scrolls long content (`n`/`p` move five rows).
 
 Press **Up** from the first row to focus the column header; use **Left/Right**
 to choose a column and **Enter** to sort it descending, then ascending on the

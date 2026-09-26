@@ -27,6 +27,7 @@ type jobRecord struct {
 	QoS       string    `json:"qos"`
 	Partition string    `json:"partition"`
 	Name      string    `json:"name"`
+	Nodes     string    `json:"nodes"`
 	User      string    `json:"user_name"`
 	State     []string  `json:"job_state"`
 	StartTime slurmTime `json:"start_time"`
@@ -52,6 +53,7 @@ type Job struct {
 	CPUs           int    `json:"cpus"`
 	GPUs           int    `json:"gpus"`
 	MemoryMB       int    `json:"memory_mb"`
+	nodes          string
 }
 type Usage struct {
 	User            string `json:"user"`
@@ -92,6 +94,7 @@ type Snapshot struct {
 	OtherGPUCapacity        int       `json:"other_gpu_capacity"`
 	OtherGPUAllocated       int       `json:"other_gpu_allocated"`
 	Jobs                    []Job     `json:"jobs"`
+	nodes                   []Node
 }
 
 func tresValue(tres, key string) string {
@@ -162,7 +165,7 @@ func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 	if err := json.Unmarshal(data, &response); err != nil {
 		return Snapshot{}, fmt.Errorf("decode squeue JSON: %w", err)
 	}
-	snap := Snapshot{UpdatedAt: at, Users: []Usage{}, Jobs: []Job{}}
+	snap := Snapshot{UpdatedAt: at, Users: []Usage{}, Jobs: []Job{}, nodes: append([]Node(nil), nodes...)}
 	ignoredOther := 0
 	for _, n := range nodes {
 		snap.CapacityCPU += n.CPUTotal
@@ -206,6 +209,7 @@ func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 		j.QoS = printable(j.QoS)
 		j.Partition = printable(j.Partition)
 		j.Name = printable(j.Name)
+		j.Nodes = printable(j.Nodes)
 		u := users[j.User]
 		if u == nil {
 			u = &Usage{User: j.User}
@@ -221,7 +225,7 @@ func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 			u.GPUs += gpuFromTRES(j.Alloc)
 			u.MemoryMB += memoryMB(tresValue(j.Alloc, "mem"))
 			gpuTypeCounts(j.Alloc, &snap.H200Allocated, &snap.MIGAllocated, &snap.OtherGPUAllocated)
-			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "RUNNING", Progress: jobProgress(j.State, j.StartTime, j.EndTime, at), Elapsed: elapsed, ElapsedMinutes: elapsedMinutes, CPUs: number(tresValue(j.Alloc, "cpu")), GPUs: gpuFromTRES(j.Alloc), MemoryMB: memoryMB(tresValue(j.Alloc, "mem"))})
+			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "RUNNING", Progress: jobProgress(j.State, j.StartTime, j.EndTime, at), Elapsed: elapsed, ElapsedMinutes: elapsedMinutes, CPUs: number(tresValue(j.Alloc, "cpu")), GPUs: gpuFromTRES(j.Alloc), MemoryMB: memoryMB(tresValue(j.Alloc, "mem")), nodes: j.Nodes})
 		} else {
 			u.PendingJobs++
 			snap.PendingJobs++
@@ -229,7 +233,7 @@ func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 			u.PendingGPUs += gpuFromTRES(j.Requested)
 			u.PendingMemoryMB += memoryMB(tresValue(j.Requested, "mem"))
 			elapsed, elapsedMinutes := elapsedStatus(j.State, j.StartTime, j.TimeLimit, at)
-			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "PENDING", Elapsed: elapsed, ElapsedMinutes: elapsedMinutes, CPUs: number(tresValue(j.Requested, "cpu")), GPUs: gpuFromTRES(j.Requested), MemoryMB: memoryMB(tresValue(j.Requested, "mem"))})
+			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "PENDING", Elapsed: elapsed, ElapsedMinutes: elapsedMinutes, CPUs: number(tresValue(j.Requested, "cpu")), GPUs: gpuFromTRES(j.Requested), MemoryMB: memoryMB(tresValue(j.Requested, "mem")), nodes: j.Nodes})
 		}
 	}
 	for _, u := range users {
@@ -369,7 +373,7 @@ func memoryCPU(memoryMiB, cpus int) string {
 }
 
 func userHeader(by string, asc bool) string {
-	return strings.Join([]string{
+	return "\x1b[1m" + strings.Join([]string{
 		leftHeader("USER", "user", by, asc, 16),
 		leftHeader("RUN", "jobs", by, asc, 6),
 		leftHeader("GPU", "gpu", by, asc, 6),
@@ -384,7 +388,7 @@ func userHeader(by string, asc bool) string {
 		leftHeader("C:G", "pending-cpu-gpu", by, asc, 6),
 		leftHeader("MEM", "pending-mem", by, asc, 6),
 		leftHeader("M:C", "pending-memory-cpu", by, asc, 6),
-	}, " ")
+	}, " ") + "\x1b[22m"
 }
 
 func collectTop(ctx context.Context) (Snapshot, error) {

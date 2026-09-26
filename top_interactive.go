@@ -25,67 +25,102 @@ type uiEvent struct {
 
 // SGR mouse reports are 1-based: ESC [ < button ; x ; y M (press) / m (release).
 func readTopEvents(in *os.File, events chan<- uiEvent) {
-	var buf [1]byte
+	bytes := make(chan byte)
+	go func() {
+		defer close(bytes)
+		var buf [1]byte
+		for {
+			if _, err := in.Read(buf[:]); err != nil {
+				return
+			}
+			bytes <- buf[0]
+		}
+	}()
+
 	state := 0
 	var seq strings.Builder
+	var escapeTimeout <-chan time.Time
+	var escapeTimer *time.Timer
 	send := func(e uiEvent) {
 		select {
 		case events <- e:
 		default:
 		}
 	}
-	for {
-		if _, err := in.Read(buf[:]); err != nil {
-			return
+	stopEscapeTimer := func() {
+		if escapeTimer != nil && !escapeTimer.Stop() {
+			select {
+			case <-escapeTimer.C:
+			default:
+			}
 		}
-		b := buf[0]
-		switch state {
-		case 0:
-			if b == 27 {
-				state = 1
-			} else {
-				send(uiEvent{key: string(b)})
+		escapeTimeout = nil
+	}
+	for {
+		select {
+		case <-escapeTimeout:
+			// A lone ESC is distinct from an escape sequence. Give terminals a
+			// brief opportunity to deliver the remainder of an arrow sequence.
+			send(uiEvent{key: "escape"})
+			state = 0
+			escapeTimeout = nil
+		case b, ok := <-bytes:
+			if !ok {
+				return
 			}
-		case 1:
-			if b == '[' {
-				state = 2
-				seq.Reset()
-			} else {
-				state = 0
-			}
-		case 2:
-			if b == 'A' || b == 'B' || b == 'C' || b == 'D' {
-				send(uiEvent{key: map[byte]string{'A': "up", 'B': "down", 'C': "right", 'D': "left"}[b]})
-				state = 0
-				continue
-			}
-			if b == 'M' || b == 'm' {
-				text := seq.String()
-				state = 0
-				if !strings.HasPrefix(text, "<") || b == 'm' {
+			switch state {
+			case 0:
+				if b == 27 {
+					state = 1
+					escapeTimer = time.NewTimer(50 * time.Millisecond)
+					escapeTimeout = escapeTimer.C
+				} else {
+					send(uiEvent{key: string(b)})
+				}
+			case 1:
+				stopEscapeTimer()
+				if b == '[' {
+					state = 2
+					seq.Reset()
+				} else {
+					send(uiEvent{key: "escape"})
+					state = 0
+					send(uiEvent{key: string(b)})
+				}
+			case 2:
+				if b == 'A' || b == 'B' || b == 'C' || b == 'D' || b == 'Z' {
+					send(uiEvent{key: map[byte]string{'A': "up", 'B': "down", 'C': "right", 'D': "left", 'Z': "shift-tab"}[b]})
+					state = 0
 					continue
 				}
-				parts := strings.Split(text[1:], ";")
-				if len(parts) != 3 {
-					continue
+				if b == 'M' || b == 'm' {
+					text := seq.String()
+					state = 0
+					if !strings.HasPrefix(text, "<") || b == 'm' {
+						continue
+					}
+					parts := strings.Split(text[1:], ";")
+					if len(parts) != 3 {
+						continue
+					}
+					button, e1 := strconv.Atoi(parts[0])
+					x, e2 := strconv.Atoi(parts[1])
+					y, e3 := strconv.Atoi(parts[2])
+					if e1 != nil || e2 != nil || e3 != nil {
+						continue
+					}
+					if button == 64 {
+						send(uiEvent{wheel: -1})
+					} else if button == 65 {
+						send(uiEvent{wheel: 1})
+					} else if button == 0 {
+						send(uiEvent{key: "click", x: x, y: y})
+					}
+				} else if seq.Len() < 40 {
+					seq.WriteByte(b)
+				} else {
+					state = 0
 				}
-				button, e1 := strconv.Atoi(parts[0])
-				x, e2 := strconv.Atoi(parts[1])
-				y, e3 := strconv.Atoi(parts[2])
-				if e1 != nil || e2 != nil || e3 != nil {
-					continue
-				}
-				if button == 64 {
-					send(uiEvent{wheel: -1})
-				} else if button == 65 {
-					send(uiEvent{wheel: 1})
-				} else if button == 0 {
-					send(uiEvent{key: "click", x: x, y: y})
-				}
-			} else if seq.Len() < 40 {
-				seq.WriteByte(b)
-			} else {
-				state = 0
 			}
 		}
 	}
@@ -163,6 +198,15 @@ type tableColumn struct {
 	label string
 }
 
+func rightAlignedColumn(field string) bool {
+	switch field {
+	case "jobs", "pending-jobs", "gpu", "cpu", "cpu-gpu", "mem", "memory-cpu", "pending-gpu", "pending-cpu", "pending-cpu-gpu", "pending-mem", "pending-memory-cpu", "elapsed":
+		return true
+	default:
+		return false
+	}
+}
+
 func renderTable(columns []tableColumn, rows [][]string, by string, asc bool) (string, []string, []headerColumn) {
 	widths := make([]int, len(columns))
 	for i, column := range columns {
@@ -191,7 +235,7 @@ func renderTable(columns []tableColumn, rows [][]string, by string, asc bool) (s
 			// the reverse-video background of a selected row after its progress bar.
 			visible := utf8.RuneCountInString(sgrPattern.ReplaceAllString(value, ""))
 			padding := strings.Repeat(" ", widths[j]-visible)
-			if columns[j].field == "elapsed" {
+			if rightAlignedColumn(columns[j].field) {
 				parts[j] = padding + value
 			} else {
 				parts[j] = value + padding
@@ -199,7 +243,7 @@ func renderTable(columns []tableColumn, rows [][]string, by string, asc bool) (s
 		}
 		lines[i] = strings.Join(parts, "  ")
 	}
-	return strings.Join(headerParts, "  "), lines, headerColumns
+	return "\x1b[1m" + strings.Join(headerParts, "  ") + "\x1b[22m", lines, headerColumns
 }
 
 func topRows(s Snapshot, user, by string, asc bool, color ...bool) ([]string, []string, []string, []headerColumn) {
@@ -277,6 +321,12 @@ func headerByteOffset(header string, cells int) int {
 		return 0
 	}
 	for i := 0; i < len(header) && cells > 0; {
+		if header[i] == 27 && i+1 < len(header) && header[i+1] == '[' {
+			if end := strings.IndexByte(header[i:], 'm'); end >= 0 {
+				i += end + 1
+				continue
+			}
+		}
 		_, size := utf8.DecodeRuneInString(header[i:])
 		i += size
 		cells--
@@ -293,7 +343,7 @@ func highlightHeader(header string, column headerColumn) string {
 	if start >= end {
 		return header
 	}
-	return header[:start] + "\x1b[7m" + header[start:end] + "\x1b[0m" + header[end:]
+	return header[:start] + "\x1b[7m" + header[start:end] + "\x1b[27m" + header[end:]
 }
 
 // Color reflects Slurm allocation / configured capacity, not measured usage.
@@ -423,6 +473,60 @@ func statBox(label string, content ...string) []string {
 	return append(result, "╰"+strings.Repeat("─", inner)+"╯")
 }
 
+func paneMenuLabel(pane string) string {
+	return map[string]string{"cluster": "JOBS", "user": "JOBS", "gpu": "GPU", "node": "NODE"}[pane]
+}
+
+// viewMenu presents every lower-pane view and highlights the active label.
+func viewMenu(active string) []string {
+	labels := []string{"JOBS", "GPU", "NODE"}
+	for i, label := range labels {
+		padded := " " + label + " "
+		if label == active {
+			labels[i] = "\x1b[7m" + padded + "\x1b[27m"
+		} else {
+			labels[i] = padded
+		}
+	}
+	return []string{strings.Join(labels, "  ")}
+}
+
+func menuColumns() []headerColumn {
+	labels := []struct {
+		field, label string
+	}{{"cluster", "JOBS"}, {"gpu", "GPU"}, {"node", "NODE"}}
+	columns := make([]headerColumn, len(labels))
+	start := 1
+	for i, item := range labels {
+		end := start + visibleWidth(item.label) + 1
+		columns[i] = headerColumn{item.field, start, end}
+		start = end + 3 // two spaces separate adjacent menu items
+	}
+	return columns
+}
+
+// cycleTopPane skips USER because a user-specific job view can only be opened
+// from CLUSTER with Enter or Right.
+func cycleTopPane(pane string, reverse bool) string {
+	if pane == "user" {
+		if reverse {
+			return "cluster"
+		}
+		return "gpu"
+	}
+	panes := []string{"cluster", "gpu", "node"}
+	for i, candidate := range panes {
+		if pane != candidate {
+			continue
+		}
+		if reverse {
+			return panes[(i+len(panes)-1)%len(panes)]
+		}
+		return panes[(i+1)%len(panes)]
+	}
+	return "cluster"
+}
+
 func joinStatBoxes(boxes ...[]string) []string {
 	lines := make([]string, 0, len(boxes[0]))
 	for row := range boxes[0] {
@@ -463,12 +567,146 @@ func horizontalBars(s Snapshot, width int, colored ...bool) []string {
 	gpuInfo := strings.Repeat(" ", visibleWidth(h200Label)) + h200Info + "  " + strings.Repeat(" ", visibleWidth(migLabel)) + migInfo
 	gpuUnavailable := strings.Repeat(" ", visibleWidth(h200Label)) + h200Unavailable + "  " + strings.Repeat(" ", visibleWidth(migLabel)) + migUnavailable
 	gpuBox := statBox("GPU", gpuStatus, gpuInfo, gpuUnavailable)
-	all := joinStatBoxes(cpuBox, memBox, gpuBox)
+	all := joinStatBoxes(gpuBox, cpuBox, memBox)
 	if width >= visibleWidth(all[0]) {
 		return all
 	}
-	return append(joinStatBoxes(cpuBox, memBox), gpuBox...)
+	return append(gpuBox, joinStatBoxes(cpuBox, memBox)...)
 }
+func wrapPopupText(text string, width int) []string {
+	if width < 1 {
+		return []string{""}
+	}
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return []string{""}
+	}
+	lines := []string{}
+	line := ""
+	for _, word := range words {
+		if visibleWidth(word) > width {
+			if line != "" {
+				lines = append(lines, line)
+				line = ""
+			}
+			for len([]rune(word)) > width {
+				lines = append(lines, string([]rune(word)[:width]))
+				word = string([]rune(word)[width:])
+			}
+		}
+		if line == "" {
+			line = word
+		} else if visibleWidth(line)+1+visibleWidth(word) <= width {
+			line += " " + word
+		} else {
+			lines = append(lines, line)
+			line = word
+		}
+	}
+	if line != "" {
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+func jobRunsOnNode(nodes, node string) bool {
+	for len(nodes) > 0 {
+		part, rest, found := strings.Cut(nodes, ",")
+		if open := strings.IndexByte(part, '['); open >= 0 {
+			// A comma inside a hostlist bracket belongs to the same expression.
+			if close := strings.IndexByte(nodes[open:], ']'); close >= 0 {
+				end := open + close
+				part = nodes[:end+1]
+				if end+1 < len(nodes) && nodes[end+1] == ',' {
+					rest = nodes[end+2:]
+				} else {
+					rest = nodes[end+1:]
+				}
+				found = true
+			}
+		}
+		if part == node {
+			return true
+		}
+		open, close := strings.IndexByte(part, '['), strings.IndexByte(part, ']')
+		if open >= 0 && close > open {
+			prefix, suffix := part[:open], part[close+1:]
+			for _, span := range strings.Split(part[open+1:close], ",") {
+				first, last, ranged := strings.Cut(span, "-")
+				if !ranged {
+					last = first
+				}
+				start, e1 := strconv.Atoi(first)
+				end, e2 := strconv.Atoi(last)
+				if e1 != nil || e2 != nil {
+					continue
+				}
+				padding := max(len(first), len(last))
+				for i := start; i <= end; i++ {
+					if node == prefix+fmt.Sprintf("%0*d", padding, i)+suffix {
+						return true
+					}
+				}
+			}
+		}
+		if !found {
+			break
+		}
+		nodes = rest
+	}
+	return false
+}
+
+func nodePopup(n Node, jobs []Job, width, height, scroll int) []string {
+	// Keep the overlay width fixed and pad its text one cell from each border.
+	inner := max(3, min(width-4, 70))
+	textWidth := inner - 2
+	details := []string{
+		"Node: " + printable(n.Name) + "  State: " + printable(n.State),
+		fmt.Sprintf("GPU: %s  %d/%d allocated", printable(n.GPUType), n.GPUAllocated, n.GPUTotal),
+		fmt.Sprintf("CPU: %d/%d allocated  Memory: %s/%s GB", n.CPUAllocated, n.CPUTotal, gb(n.MemoryAllocatedMB), gb(n.MemoryTotalMB)),
+	}
+	if n.MemoryFreeMB != nil {
+		details = append(details, fmt.Sprintf("Free memory: %s GB", gb(*n.MemoryFreeMB)))
+	}
+	if n.Reason != "" {
+		details = append(details, "Reason: "+printable(n.Reason))
+	}
+	for _, job := range jobs {
+		if job.State == "RUNNING" && jobRunsOnNode(job.nodes, n.Name) {
+			details = append(details, fmt.Sprintf("Job %d  User: %s  Account: %s  GPU: %d  CPU: %d  MEM: %s GB", job.ID, job.User, job.Account, job.GPUs, job.CPUs, gb(job.MemoryMB)))
+		}
+	}
+	wrapped := []string{}
+	for _, detail := range details {
+		wrapped = append(wrapped, wrapPopupText(detail, textWidth)...)
+	}
+	innerRows := max(1, height-2)
+	maxScroll := max(0, len(wrapped)-innerRows)
+	scroll = min(max(0, scroll), maxScroll)
+	thumbRow := 0
+	if maxScroll > 0 && innerRows > 1 {
+		thumbRow = scroll * (innerRows - 1) / maxScroll
+	}
+	lines := []string{"╭" + strings.Repeat("─", inner) + "╮"}
+	for i := 0; i < innerRows; i++ {
+		text := ""
+		if i+scroll < len(wrapped) {
+			text = wrapped[i+scroll]
+		}
+		if maxScroll > 0 {
+			marker := "░"
+			if i == thumbRow {
+				marker = "█"
+			}
+			lines = append(lines, "│ "+fit(text, textWidth)+marker+"│")
+		} else {
+			lines = append(lines, "│ "+fit(text, textWidth)+" │")
+		}
+	}
+	return append(lines, "╰"+strings.Repeat("─", inner)+"╯")
+}
+
 func userJobStats(s Snapshot, user string) (accounts, running, pending int) {
 	seen := map[string]struct{}{}
 	for _, job := range s.Jobs {
@@ -520,11 +758,13 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 	defer signal.Stop(resize)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	user, by, asc, selected, scroll, message := "", initialSort, false, 0, 0, ""
+	pane, user, by, asc, selected, scroll, message := "cluster", "", initialSort, false, 0, 0, ""
 	summaryBy, summaryAsc, returnUser := initialSort, false, ""
-	hScroll, tableWidth := 0, 0
+	nodeSelected, nodeScroll, popupScroll, hScroll, tableWidth := 0, 0, 0, 0, 0
+	popupX, popupY, popupWidth, popupHeight := 0, 0, 0, 0
+	nodePopupOpen := false
 	headerFocused, selectedHeader, headerActivated := false, 0, false
-	width, height, headerY, rows := 80, 24, 5, 1
+	width, height, menuStartY, headerY, rows := 80, 24, 2, 5, 1
 	ids := []string{}
 	columns := []headerColumn{}
 	draw := func() error {
@@ -541,57 +781,69 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 		width, height = w, h
 		colorBars := os.Getenv("NO_COLOR") == "" && os.Getenv("CLICOLOR") != "0"
 		bars := horizontalBars(s, width-1, colorBars)
-		headerY = 3 + len(bars) // 1-based row of column headings
+		menu := viewMenu(paneMenuLabel(pane))
+		menuStartY = len(bars) + 2
+		headerY = len(bars) + len(menu) + 3 // 1-based row of column headings
 		rows = height - headerY - 1
 		if rows < 1 {
 			rows = 1
 		}
-		headers, items, rowIDs, currentColumns := topRows(s, user, by, asc, colorBars)
-		ids, columns = rowIDs, currentColumns
-		tableWidth = utf8.RuneCountInString(sgrPattern.ReplaceAllString(headers[0], ""))
-		for _, item := range items {
-			tableWidth = max(tableWidth, utf8.RuneCountInString(sgrPattern.ReplaceAllString(item, "")))
-		}
-		if user == "" {
-			hScroll = 0
-		} else {
-			hScroll = min(hScroll, max(0, tableWidth-(width-1)))
-		}
-		if selectedHeader >= len(columns) {
-			selectedHeader = len(columns) - 1
-		}
-		if selectedHeader < 0 {
-			selectedHeader = 0
-		}
-		if user == "" && returnUser != "" {
-			for i, id := range rowIDs {
-				if id == returnUser {
-					selected = i
-					break
+		isTable := pane == "cluster" || pane == "user"
+		var headers, items []string
+		if isTable {
+			tableUser := ""
+			if pane == "user" {
+				tableUser = user
+			}
+			var rowIDs []string
+			var currentColumns []headerColumn
+			headers, items, rowIDs, currentColumns = topRows(s, tableUser, by, asc, colorBars)
+			ids, columns = rowIDs, currentColumns
+			tableWidth = utf8.RuneCountInString(sgrPattern.ReplaceAllString(headers[0], ""))
+			for _, item := range items {
+				tableWidth = max(tableWidth, utf8.RuneCountInString(sgrPattern.ReplaceAllString(item, "")))
+			}
+			if pane == "cluster" {
+				hScroll = 0
+			} else {
+				hScroll = min(hScroll, max(0, tableWidth-(width-1)))
+			}
+			if selectedHeader >= len(columns) {
+				selectedHeader = len(columns) - 1
+			}
+			if selectedHeader < 0 {
+				selectedHeader = 0
+			}
+			if pane == "cluster" && returnUser != "" {
+				for i, id := range rowIDs {
+					if id == returnUser {
+						selected = i
+						break
+					}
 				}
+				returnUser = ""
 			}
-			returnUser = ""
-		}
-		if len(items) == 0 {
-			selected, scroll = 0, 0
-		} else {
-			if selected >= len(items) {
-				selected = len(items) - 1
-			}
-			if selected < 0 {
-				selected = 0
-			}
-			if scroll > selected {
-				scroll = selected
-			}
-			if selected >= scroll+rows {
-				scroll = selected - rows + 1
+			if len(items) == 0 {
+				selected, scroll = 0, 0
+			} else {
+				if selected >= len(items) {
+					selected = len(items) - 1
+				}
+				if selected < 0 {
+					selected = 0
+				}
+				if scroll > selected {
+					scroll = selected
+				}
+				if selected >= scroll+rows {
+					scroll = selected - rows + 1
+				}
 			}
 		}
 		var b bytes.Buffer
 		b.WriteString("\x1b[H\x1b[2J")
 		title := fmt.Sprintf("slurm-top  %s  %d users / %d accounts / %d running / %d pending", s.UpdatedAt.Format("15:04:05"), len(s.Users), s.ActiveAccounts, s.RunningJobs, s.PendingJobs)
-		if user != "" {
+		if pane == "user" {
 			accounts, running, pending := userJobStats(s, user)
 			title = fmt.Sprintf("slurm-top  %s  1 user / %d accounts / %d running / %d pending  %s", s.UpdatedAt.Format("15:04:05"), accounts, running, pending, user)
 		}
@@ -603,26 +855,79 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				fmt.Fprint(&b, fit(line, width-1), "\r\n")
 			}
 		}
-		fmt.Fprint(&b, "\r\n")
-		header := headers[0]
-		if headerFocused {
-			header = highlightHeader(header, columns[selectedHeader])
+		for _, line := range menu {
+			fmt.Fprint(&b, fitANSI(line, width-1), "\r\n")
 		}
-		offset := 0
-		if user != "" {
-			offset = hScroll
-		}
-		fmt.Fprint(&b, cropANSI(header, offset, width-1), "\r\n")
-		for i := scroll; i < len(items) && i < scroll+rows; i++ {
-			line := cropANSI(items[i], offset, width-1)
-			if !headerFocused && i == selected {
-				line = "\x1b[7m" + line + "\x1b[0m"
+		fmt.Fprint(&b, strings.Repeat("─", width-1), "\r\n")
+		if isTable {
+			header := headers[0]
+			if headerFocused {
+				header = highlightHeader(header, columns[selectedHeader])
 			}
-			fmt.Fprint(&b, line, "\r\n")
+			offset := 0
+			if pane == "user" {
+				offset = hScroll
+			}
+			fmt.Fprint(&b, cropANSI(header, offset, width-1), "\r\n")
+			for i := scroll; i < len(items) && i < scroll+rows; i++ {
+				line := cropANSI(items[i], offset, width-1)
+				if !headerFocused && i == selected {
+					line = "\x1b[7m" + line + "\x1b[0m"
+				}
+				fmt.Fprint(&b, line, "\r\n")
+			}
+		} else {
+			visibleRows := max(1, height-headerY)
+			if pane == "gpu" {
+				nodeSelected = min(nodeSelected, max(0, len(s.nodes)-1))
+			}
+			{
+				var body bytes.Buffer
+				if pane == "gpu" {
+					if err := renderGridSelected(&body, s.nodes, time.Now(), width-1, 0, 0, colorBars, nodeSelected); err != nil {
+						return err
+					}
+				} else if err := renderDashboard(&body, s.nodes, time.Now(), width-1, colorBars); err != nil {
+					return err
+				}
+				bodyLines := bytes.Split(bytes.TrimSuffix(body.Bytes(), []byte("\n")), []byte("\n"))
+				if pane == "gpu" {
+					for i, line := range bodyLines {
+						if bytes.Contains(line, []byte("\x1b[7m")) {
+							if i < nodeScroll {
+								nodeScroll = i
+							} else if i >= nodeScroll+visibleRows {
+								nodeScroll = i - visibleRows + 1
+							}
+							break
+						}
+					}
+				}
+				nodeScroll = min(nodeScroll, max(0, len(bodyLines)-visibleRows))
+				for i := nodeScroll; i < len(bodyLines) && i < nodeScroll+visibleRows; i++ {
+					fmt.Fprint(&b, fitANSI(string(bodyLines[i]), width-1), "\r\n")
+				}
+				if pane == "gpu" && nodePopupOpen && len(s.nodes) > 0 {
+					popupHeight := min(12, visibleRows)
+					popup := nodePopup(s.nodes[nodeSelected], s.Jobs, width-1, popupHeight, popupScroll)
+					popupWidth, popupHeight = visibleWidth(popup[0]), len(popup)
+					popupX = max(1, (width-popupWidth)/2)
+					popupY = headerY + max(0, (visibleRows-popupHeight)/2)
+					for i, line := range popup {
+						fmt.Fprintf(&b, "\x1b[%d;%dH%s", popupY+i, popupX, line)
+					}
+				}
+			}
 		}
-		footer := "↑ header/rows  ←/→ header columns  Enter sort  → jobs  ← users  click header sort  q quit"
-		if user != "" {
-			footer = "Jobs: " + user + "  ↑ header/rows  ←/→ scroll table (← users at left edge)  Enter sort  q quit"
+		footer := "Tab/Shift-Tab views  ↑ header/rows  ←/→ header columns  Enter sort  → user jobs  q quit"
+		if pane == "user" {
+			footer = "Jobs: " + user + "  Tab/Shift-Tab views  ←/→ scroll table (← users at left edge)  Esc users  q quit"
+		} else if pane == "gpu" && nodePopupOpen {
+			footer = "Node details  ↑/↓ scroll  Esc close  q quit"
+		} else if pane == "gpu" {
+			footer = "Tab/Shift-Tab views  ↑/↓ select node  Enter details  r refresh  q quit"
+		} else if pane == "node" {
+			footer = "Tab/Shift-Tab views  ↑/↓ scroll  r refresh  q quit"
 		}
 		if message != "" {
 			footer += "  " + message
@@ -643,11 +948,42 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				return err
 			}
 		case ev := <-events:
+			tablePane := pane == "cluster" || pane == "user"
 			switch ev.key {
 			case "q", "Q", "\x03":
 				return nil
+			case "\t", "shift-tab":
+				pane = cycleTopPane(pane, ev.key == "shift-tab")
+				headerFocused, headerActivated = false, false
+				nodePopupOpen, nodeScroll = false, 0
+			case "n", " ":
+				if pane == "gpu" && nodePopupOpen {
+					popupScroll += 5
+				} else if pane == "gpu" || pane == "node" {
+					nodeScroll += 5
+				} else {
+					continue
+				}
+			case "p":
+				if pane == "gpu" && nodePopupOpen {
+					popupScroll = max(0, popupScroll-5)
+				} else if pane == "gpu" || pane == "node" {
+					nodeScroll = max(0, nodeScroll-5)
+				} else {
+					continue
+				}
 			case "down", "j":
-				if ev.key == "j" && user == "" && !headerFocused {
+				if !tablePane {
+					if pane == "gpu" && nodePopupOpen {
+						popupScroll++
+					} else if pane == "gpu" {
+						nodeSelected = min(nodeSelected+gridColumns(width-1), max(0, len(s.nodes)-1))
+					} else {
+						nodeScroll++
+					}
+					break
+				}
+				if ev.key == "j" && pane == "cluster" && !headerFocused {
 					by = "jobs"
 					asc = false
 					selected = 0
@@ -659,6 +995,16 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					selected++
 				}
 			case "up", "k":
+				if !tablePane {
+					if pane == "gpu" && nodePopupOpen {
+						popupScroll = max(0, popupScroll-1)
+					} else if pane == "gpu" {
+						nodeSelected = max(0, nodeSelected-gridColumns(width-1))
+					} else {
+						nodeScroll = max(0, nodeScroll-1)
+					}
+					break
+				}
 				if selected == 0 {
 					if !headerFocused {
 						headerActivated = false
@@ -668,58 +1014,85 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					selected--
 				}
 			case "right":
-				if headerFocused {
+				if !tablePane {
+					if pane == "gpu" && !nodePopupOpen {
+						columns := gridColumns(width - 1)
+						if nodeSelected%columns < columns-1 && nodeSelected+1 < len(s.nodes) {
+							nodeSelected++
+						}
+					} else {
+						continue
+					}
+				} else if headerFocused {
 					if selectedHeader < len(columns)-1 {
 						selectedHeader++
 						headerActivated = false
 					}
-				} else if user == "" && selected < len(ids) {
+				} else if pane == "cluster" && selected < len(ids) {
 					summaryBy, summaryAsc = by, asc
-					user = ids[selected]
-					by = "elapsed"
-					asc = false
+					user, pane = ids[selected], "user"
+					by, asc = "elapsed", false
 					selected, scroll, hScroll = 0, 0, 0
-				} else if user != "" {
+				} else if pane == "user" {
 					hScroll = min(hScroll+max(1, (width-1)/2), max(0, tableWidth-(width-1)))
 				}
 			case "\r", "\n":
+				if !tablePane {
+					if pane == "gpu" && !nodePopupOpen && len(s.nodes) > 0 {
+						nodePopupOpen, popupScroll = true, 0
+					} else {
+						continue
+					}
+					break
+				}
 				if headerFocused {
 					field := columns[selectedHeader].field
 					if headerActivated && field == by {
 						asc = !asc
 					} else {
-						by = field
-						asc = false
+						by, asc = field, false
 					}
 					headerActivated = true
-					selected = 0
-					scroll = 0
-				} else if user == "" && selected < len(ids) {
+					selected, scroll = 0, 0
+				} else if pane == "cluster" && selected < len(ids) {
 					summaryBy, summaryAsc = by, asc
-					user = ids[selected]
-					by = "elapsed"
-					asc = false
-					selected = 0
-					scroll = 0
+					user, pane = ids[selected], "user"
+					by, asc = "elapsed", false
+					selected, scroll = 0, 0
+				}
+			case "escape":
+				if pane == "gpu" && nodePopupOpen {
+					nodePopupOpen, popupScroll = false, 0
+				} else if pane == "user" {
+					returnUser, pane = user, "cluster"
+					by, asc = summaryBy, summaryAsc
+					selected, scroll, hScroll = 0, 0, 0
 				}
 			case "left":
-				if headerFocused && selectedHeader > 0 {
+				if !tablePane {
+					if pane == "gpu" && !nodePopupOpen {
+						columns := gridColumns(width - 1)
+						if nodeSelected%columns > 0 {
+							nodeSelected--
+						}
+					} else {
+						continue
+					}
+				} else if headerFocused && selectedHeader > 0 {
 					selectedHeader--
 					headerActivated = false
-				} else if user != "" && hScroll > 0 {
+				} else if pane == "user" && hScroll > 0 {
 					hScroll = max(0, hScroll-max(1, (width-1)/2))
-				} else if user != "" {
-					returnUser = user
-					user = ""
+				} else if pane == "user" {
+					returnUser, pane = user, "cluster"
 					by, asc = summaryBy, summaryAsc
 					selected, scroll, hScroll = 0, 0, 0
 				}
 			case "g", "c", "m", "u":
-				if user == "" {
+				if pane == "cluster" {
 					by = map[string]string{"g": "gpu", "c": "cpu", "m": "mem", "u": "user"}[ev.key]
 					asc = false
-					selected = 0
-					scroll = 0
+					selected, scroll = 0, 0
 				}
 			case "r":
 				updated, e := load()
@@ -733,7 +1106,30 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					message = ""
 				}
 			case "click":
-				if ev.y == headerY {
+				if pane == "gpu" && nodePopupOpen {
+					inside := ev.x >= popupX && ev.x < popupX+popupWidth && ev.y >= popupY && ev.y < popupY+popupHeight
+					if !inside {
+						nodePopupOpen, popupScroll = false, 0
+					}
+				} else if ev.y >= menuStartY && ev.y < menuStartY+len(viewMenu(paneMenuLabel(pane))) {
+					for _, column := range menuColumns() {
+						if ev.x >= column.start && ev.x <= column.end {
+							pane = column.field
+							headerFocused, headerActivated = false, false
+							nodePopupOpen, nodeScroll = false, 0
+							break
+						}
+					}
+				} else if pane == "gpu" && !nodePopupOpen {
+					if index := gridNodeAt(s.nodes, width-1, nodeScroll+ev.y-headerY, ev.x); index >= 0 {
+						nodeSelected = index
+						nodePopupOpen, popupScroll = true, 0
+					} else {
+						continue
+					}
+				} else if !tablePane {
+					continue
+				} else if ev.y == headerY {
 					field := ""
 					x := ev.x + hScroll
 					for _, column := range columns {
@@ -760,14 +1156,18 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 						scroll = 0
 					}
 				}
-				if ev.y > headerY && ev.y < height {
+				if tablePane && ev.y > headerY && ev.y < height {
 					headerFocused, headerActivated = false, false
 					selected = scroll + ev.y - headerY - 1
 				}
 			default:
-				if ev.wheel != 0 {
+				if ev.wheel != 0 && tablePane {
 					headerFocused, headerActivated = false, false
 					selected += ev.wheel
+				} else if ev.wheel != 0 && pane == "gpu" && nodePopupOpen {
+					popupScroll = max(0, popupScroll+ev.wheel)
+				} else if ev.wheel != 0 && pane == "node" {
+					nodeScroll = max(0, nodeScroll+ev.wheel)
 				} else {
 					continue
 				}
@@ -795,7 +1195,11 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 			} else {
 				s = updated
 				message = ""
-				_, _, next, _ := topRows(s, user, by, asc)
+				tableUser := ""
+				if pane == "user" {
+					tableUser = user
+				}
+				_, _, next, _ := topRows(s, tableUser, by, asc)
 				for i, item := range next {
 					if item == id {
 						selected = i
