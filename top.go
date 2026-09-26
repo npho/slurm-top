@@ -67,25 +67,30 @@ type Usage struct {
 	// are not hardware usage and sstat denies access to other users' steps.
 }
 type Snapshot struct {
-	UpdatedAt           time.Time `json:"updated_at"`
-	Users               []Usage   `json:"users"`
-	RunningJobs         int       `json:"running_jobs"`
-	PendingJobs         int       `json:"pending_jobs"`
-	CapacityCPU         int       `json:"capacity_cpu"`
-	CapacityGPU         int       `json:"capacity_gpu"`
-	CapacityMemoryMB    int       `json:"capacity_memory_mb"`
-	AllocatableCPU      int       `json:"allocatable_cpu"`
-	AllocatableGPU      int       `json:"allocatable_gpu"`
-	AllocatableMemoryMB int       `json:"allocatable_memory_mb"`
-	H200Capacity        int       `json:"h200_capacity"`
-	AllocatableH200     int       `json:"allocatable_h200"`
-	H200Allocated       int       `json:"h200_allocated"`
-	MIGCapacity         int       `json:"mig_capacity"`
-	AllocatableMIG      int       `json:"allocatable_mig"`
-	MIGAllocated        int       `json:"mig_allocated"`
-	OtherGPUCapacity    int       `json:"other_gpu_capacity"`
-	OtherGPUAllocated   int       `json:"other_gpu_allocated"`
-	Jobs                []Job     `json:"jobs"`
+	UpdatedAt               time.Time `json:"updated_at"`
+	Users                   []Usage   `json:"users"`
+	RunningJobs             int       `json:"running_jobs"`
+	PendingJobs             int       `json:"pending_jobs"`
+	CapacityCPU             int       `json:"capacity_cpu"`
+	CapacityGPU             int       `json:"capacity_gpu"`
+	CapacityMemoryMB        int       `json:"capacity_memory_mb"`
+	AllocatableCPU          int       `json:"allocatable_cpu"`
+	AllocatableGPU          int       `json:"allocatable_gpu"`
+	AllocatableMemoryMB     int       `json:"allocatable_memory_mb"`
+	AllocatableCPUUsed      int       `json:"allocatable_cpu_used"`
+	AllocatableGPUUsed      int       `json:"allocatable_gpu_used"`
+	AllocatableMemoryUsedMB int       `json:"allocatable_memory_used_mb"`
+	H200Capacity            int       `json:"h200_capacity"`
+	AllocatableH200         int       `json:"allocatable_h200"`
+	AllocatableH200Used     int       `json:"allocatable_h200_used"`
+	H200Allocated           int       `json:"h200_allocated"`
+	MIGCapacity             int       `json:"mig_capacity"`
+	AllocatableMIG          int       `json:"allocatable_mig"`
+	AllocatableMIGUsed      int       `json:"allocatable_mig_used"`
+	MIGAllocated            int       `json:"mig_allocated"`
+	OtherGPUCapacity        int       `json:"other_gpu_capacity"`
+	OtherGPUAllocated       int       `json:"other_gpu_allocated"`
+	Jobs                    []Job     `json:"jobs"`
 }
 
 func tresValue(tres, key string) string {
@@ -167,7 +172,11 @@ func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 			snap.AllocatableCPU += n.CPUTotal
 			snap.AllocatableGPU += n.GPUTotal
 			snap.AllocatableMemoryMB += n.MemoryTotalMB
+			snap.AllocatableCPUUsed += n.CPUAllocated
+			snap.AllocatableGPUUsed += n.GPUAllocated
+			snap.AllocatableMemoryUsedMB += n.MemoryAllocatedMB
 			classifyGPU(n.GPUType, n.GPUTotal, &snap.AllocatableH200, &snap.AllocatableMIG, &ignoredOther)
+			classifyGPU(n.GPUType, n.GPUAllocated, &snap.AllocatableH200Used, &snap.AllocatableMIGUsed, &ignoredOther)
 		}
 	}
 	users := map[string]*Usage{}

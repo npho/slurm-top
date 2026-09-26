@@ -409,16 +409,12 @@ func joinStatBoxes(boxes ...[]string) []string {
 }
 
 func horizontalBars(s Snapshot, width int, colored ...bool) []string {
-	cpu, mem := 0, 0
-	for _, u := range s.Users {
-		cpu += u.CPUs
-		mem += u.MemoryMB
-	}
+	cpu, mem := s.AllocatableCPUUsed, s.AllocatableMemoryUsedMB
 	enabled := len(colored) > 0 && colored[0]
 	cpuInfo := usageInfo(cpu, s.AllocatableCPU, strconv.Itoa(cpu), strconv.Itoa(s.AllocatableCPU), true)
 	memInfo := usageInfo(mem, s.AllocatableMemoryMB, tb(mem), tb(s.AllocatableMemoryMB)+" TB", true)
-	h200Info := usageInfo(s.H200Allocated, s.AllocatableH200, strconv.Itoa(s.H200Allocated), strconv.Itoa(s.AllocatableH200), true)
-	migInfo := usageInfo(s.MIGAllocated, s.AllocatableMIG, strconv.Itoa(s.MIGAllocated), strconv.Itoa(s.AllocatableMIG), true)
+	h200Info := usageInfo(s.AllocatableH200Used, s.AllocatableH200, strconv.Itoa(s.AllocatableH200Used), strconv.Itoa(s.AllocatableH200), true)
+	migInfo := usageInfo(s.AllocatableMIGUsed, s.AllocatableMIG, strconv.Itoa(s.AllocatableMIGUsed), strconv.Itoa(s.AllocatableMIG), true)
 	cpuUnavailable := usageInfo(s.CapacityCPU-s.AllocatableCPU, s.CapacityCPU, strconv.Itoa(s.CapacityCPU-s.AllocatableCPU), strconv.Itoa(s.CapacityCPU), false)
 	memUnavailable := usageInfo(s.CapacityMemoryMB-s.AllocatableMemoryMB, s.CapacityMemoryMB, tb(s.CapacityMemoryMB-s.AllocatableMemoryMB), tb(s.CapacityMemoryMB)+" TB", false)
 	h200Unavailable := usageInfo(s.H200Capacity-s.AllocatableH200, s.H200Capacity, strconv.Itoa(s.H200Capacity-s.AllocatableH200), strconv.Itoa(s.H200Capacity), false)
@@ -426,7 +422,7 @@ func horizontalBars(s Snapshot, width int, colored ...bool) []string {
 	cpuBox := statBox("CPU", coloredBar(cpu, s.AllocatableCPU, visibleWidth(cpuInfo), enabled), cpuInfo, cpuUnavailable)
 	memBox := statBox("MEM", coloredBar(mem, s.AllocatableMemoryMB, visibleWidth(memInfo), enabled), memInfo, memUnavailable)
 	h200Label, migLabel := "H200 ", "H200-MIG "
-	gpuStatus := h200Label + coloredBar(s.H200Allocated, s.AllocatableH200, visibleWidth(h200Info), enabled) + "  " + migLabel + coloredBar(s.MIGAllocated, s.AllocatableMIG, visibleWidth(migInfo), enabled)
+	gpuStatus := h200Label + coloredBar(s.AllocatableH200Used, s.AllocatableH200, visibleWidth(h200Info), enabled) + "  " + migLabel + coloredBar(s.AllocatableMIGUsed, s.AllocatableMIG, visibleWidth(migInfo), enabled)
 	gpuInfo := strings.Repeat(" ", visibleWidth(h200Label)) + h200Info + "  " + strings.Repeat(" ", visibleWidth(migLabel)) + migInfo
 	gpuUnavailable := strings.Repeat(" ", visibleWidth(h200Label)) + h200Unavailable + "  " + strings.Repeat(" ", visibleWidth(migLabel)) + migUnavailable
 	gpuBox := statBox("GPU", gpuStatus, gpuInfo, gpuUnavailable)

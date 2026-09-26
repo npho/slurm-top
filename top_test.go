@@ -47,7 +47,7 @@ func TestQueueAggregation(t *testing.T) {
 		t.Fatal(e)
 	}
 	var parsed Snapshot
-	if e := json.Unmarshal(out.Bytes(), &parsed); e != nil || strings.Contains(out.String(), "memory_used") {
+	if e := json.Unmarshal(out.Bytes(), &parsed); e != nil || strings.Contains(out.String(), "memory_used_approx") {
 		t.Fatalf("unexpected JSON: %s %v", out.String(), e)
 	}
 }
@@ -176,7 +176,7 @@ func TestBarColors(t *testing.T) {
 	}
 }
 func TestHorizontalBars(t *testing.T) {
-	s := Snapshot{CapacityCPU: 64, CapacityMemoryMB: 65536, AllocatableCPU: 64, AllocatableMemoryMB: 65536, H200Capacity: 8, AllocatableH200: 8, MIGCapacity: 56, AllocatableMIG: 56, H200Allocated: 4, MIGAllocated: 12, Users: []Usage{{CPUs: 32, MemoryMB: 32768}}}
+	s := Snapshot{CapacityCPU: 64, CapacityMemoryMB: 65536, AllocatableCPU: 64, AllocatableMemoryMB: 65536, AllocatableCPUUsed: 32, AllocatableMemoryUsedMB: 32768, H200Capacity: 8, AllocatableH200: 8, AllocatableH200Used: 4, MIGCapacity: 56, AllocatableMIG: 56, AllocatableMIGUsed: 12, H200Allocated: 4, MIGAllocated: 12, Users: []Usage{{CPUs: 32, MemoryMB: 32768}}}
 	wide := horizontalBars(s, 180)
 	if len(wide) != 5 || !strings.Contains(wide[0], "CPU") || !strings.Contains(wide[0], "MEM") || !strings.Contains(wide[0], "GPU") || !strings.Contains(wide[1], "H200-MIG") {
 		t.Fatalf("wide: %v", wide)
