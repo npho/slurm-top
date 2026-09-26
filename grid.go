@@ -32,18 +32,24 @@ func gridPages(count, size int) int {
 	}
 	return (count + size - 1) / size
 }
-func gridHeader(nodes []Node, at time.Time) string {
-	total, alloc, free, bad := 0, 0, 0, 0
+func gridNodeStatusCounts(nodes []Node) (reserved, planned, unavailable int) {
 	for _, n := range nodes {
-		total += n.GPUTotal
-		alloc += n.GPUAllocated
-		if unavailable(n.State) {
-			bad++
-		} else {
-			free += n.GPUTotal - n.GPUAllocated
+		status, _ := nodeStatus(n)
+		switch {
+		case strings.HasPrefix(status, "R "):
+			reserved++
+		case strings.HasPrefix(status, "P "):
+			planned++
+		case strings.HasPrefix(status, "× "):
+			unavailable++
 		}
 	}
-	return fmt.Sprintf("Slurm GPU health  %s\n%d nodes  •  GPUs %d/%d allocated  •  %d free  •  %d restricted/unavailable\n● allocated  ○ free  R reserved  P planned  × unavailable\n", at.Format("15:04:05"), len(nodes), alloc, total, free, bad)
+	return reserved, planned, unavailable
+}
+
+func gridHeader(nodes []Node, width int) string {
+	reserved, planned, unavailable := gridNodeStatusCounts(nodes)
+	return fmt.Sprintf("%d nodes  •  %d reserved  •  %d planned  •  %d unavailable\n%s\n● allocated  ○ free  R reserved  P planned  × unavailable\n", len(nodes), reserved, planned, unavailable, strings.Repeat("─", max(1, width)))
 }
 
 const gpuRowWidth = 8
@@ -152,7 +158,7 @@ func renderGridSelected(w io.Writer, nodes []Node, at time.Time, width, page, pa
 	if width < tileWidth {
 		width = tileWidth
 	}
-	if _, err := io.WriteString(w, gridHeader(nodes, at)); err != nil {
+	if _, err := io.WriteString(w, gridHeader(nodes, width)); err != nil {
 		return err
 	}
 	columns := gridColumns(width)

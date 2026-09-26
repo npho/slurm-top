@@ -35,6 +35,34 @@ func TestGridPagesAndWidths(t *testing.T) {
 		t.Fatal("ANSI in non-terminal grid")
 	}
 }
+func TestGridHeaderStatusCounts(t *testing.T) {
+	nodes := []Node{
+		{State: "RESERVED"}, {State: "MIXED+RESERVED"},
+		{State: "PLANNED"},
+		{State: "DOWN"}, {State: "DRAIN"},
+	}
+	reserved, planned, unavailable := gridNodeStatusCounts(nodes)
+	if reserved != 2 || planned != 1 || unavailable != 2 {
+		t.Fatalf("status counts = reserved %d, planned %d, unavailable %d", reserved, planned, unavailable)
+	}
+	header := gridHeader(nodes, 40)
+	lines := strings.Split(strings.TrimSuffix(header, "\n"), "\n")
+	if len(lines) != 3 || lines[0] != "5 nodes  •  2 reserved  •  1 planned  •  2 unavailable" {
+		t.Fatalf("header = %q", header)
+	}
+	if lines[1] != strings.Repeat("─", 40) {
+		t.Fatalf("header rule = %q", lines[1])
+	}
+	if strings.Contains(header, "Slurm GPU health") {
+		t.Fatalf("redundant header remains in %q", header)
+	}
+	for _, removed := range []string{"GPUs", "free", "restricted"} {
+		if strings.Contains(lines[0], removed) {
+			t.Fatalf("removed summary %q remains in %q", removed, header)
+		}
+	}
+}
+
 func TestGridNodeAt(t *testing.T) {
 	nodes := []Node{{Name: "g1", GPUTotal: 8}, {Name: "g2", GPUTotal: 12}, {Name: "g3", GPUTotal: 8}}
 	// Grid header occupies rows 0-2; g2 makes the first tile group two rows.
