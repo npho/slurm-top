@@ -140,6 +140,14 @@ func sortJobs(jobs []Job, by string, asc bool) {
 		return cmp > 0
 	})
 }
+func displayQoS(qos string, color bool) string {
+	if color && strings.EqualFold(qos, "urgent") {
+		// Do not use SGR reset (0): it would clear a selected row's background.
+		return "\x1b[1;31m" + qos + "\x1b[22;39m"
+	}
+	return qos
+}
+
 func progressBar(percent, width int, color bool) string {
 	plain := bar(percent, 100, width)
 	if !color || percent <= 0 {
@@ -226,7 +234,7 @@ func topRows(s Snapshot, user, by string, asc bool, color ...bool) ([]string, []
 	ids := make([]string, 0, len(jobs))
 	for _, j := range jobs {
 		ids = append(ids, strconv.Itoa(j.ID)+"/"+j.State)
-		rows = append(rows, []string{strconv.Itoa(j.ID), j.Account, j.QoS, progressBar(j.Progress, 10, colorEnabled), j.Elapsed, j.Partition, strconv.Itoa(j.GPUs), strconv.Itoa(j.CPUs), cpuGPU(j.CPUs, j.GPUs), gb(j.MemoryMB), memoryCPU(j.MemoryMB, j.CPUs), j.Name})
+		rows = append(rows, []string{strconv.Itoa(j.ID), j.Account, displayQoS(j.QoS, colorEnabled), progressBar(j.Progress, 10, colorEnabled), j.Elapsed, j.Partition, strconv.Itoa(j.GPUs), strconv.Itoa(j.CPUs), cpuGPU(j.CPUs, j.GPUs), gb(j.MemoryMB), memoryCPU(j.MemoryMB, j.CPUs), j.Name})
 	}
 	header, lines, headerColumns := renderTable(columns, rows, by, asc)
 	return []string{header}, lines, ids, headerColumns

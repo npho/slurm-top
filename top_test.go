@@ -97,6 +97,12 @@ func TestJobProgressAndBar(t *testing.T) {
 	if elapsed != "50% [0-00:01|0-00:02]" || minutes != 1 {
 		t.Fatalf("elapsed = %q, %d", elapsed, minutes)
 	}
+	if got := displayQoS("urgent", true); got != "\x1b[1;31murgent\x1b[22;39m" {
+		t.Fatalf("urgent QoS = %q", got)
+	}
+	if got := displayQoS("normal", true); got != "normal" {
+		t.Fatalf("normal QoS = %q", got)
+	}
 	if got := progressBar(50, 10, true); got != "\x1b[32m█████\x1b[39m░░░░░" {
 		t.Fatalf("bar = %q", got)
 	}
