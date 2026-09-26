@@ -60,8 +60,14 @@ func card(n Node, width int, color bool) []string {
 	status, shade := nodeStatus(n)
 	content := []string{n.Name + "  " + status}
 	if n.GPUTotal > 0 {
-		glyphs := strings.Repeat("●", n.GPUAllocated) + strings.Repeat("○", n.GPUTotal-n.GPUAllocated)
-		content = append(content, fmt.Sprintf("GPU %-7s %s %d/%d", n.GPUType, glyphs, n.GPUAllocated, n.GPUTotal))
+		glyphRows := gpuGlyphRows(n.GPUAllocated, n.GPUTotal, gpuRowWidth)
+		for i, glyphs := range glyphRows {
+			if i == 0 {
+				content = append(content, fmt.Sprintf("GPU %-7s %s %d/%d", n.GPUType, glyphs, n.GPUAllocated, n.GPUTotal))
+			} else {
+				content = append(content, fmt.Sprintf("GPU %-7s %s", "", glyphs))
+			}
+		}
 	} else {
 		content = append(content, "GPU -")
 	}
@@ -79,7 +85,7 @@ func card(n Node, width int, color bool) []string {
 			if i == 0 {
 				line = tint(line, shade, true)
 			}
-			if i == 1 && n.GPUTotal > 0 {
+			if n.GPUTotal > 0 && (strings.Contains(line, "●") || strings.Contains(line, "○")) {
 				line = strings.ReplaceAll(line, "●", tint("●", "36", true))
 				line = strings.ReplaceAll(line, "○", tint("○", "32", true))
 			}
@@ -125,8 +131,19 @@ func renderDashboardFor(w io.Writer, summaryNodes, nodes []Node, at time.Time, w
 	}
 	for i := 0; i < len(nodes); i += columns {
 		cards := make([][]string, 0, columns)
+		maxLines := 0
 		for j := i; j < len(nodes) && j < i+columns; j++ {
-			cards = append(cards, card(nodes[j], cw, color))
+			c := card(nodes[j], cw, color)
+			cards = append(cards, c)
+			maxLines = max(maxLines, len(c))
+		}
+		for i, c := range cards {
+			for len(c) < maxLines {
+				// Keep variable-height GPU rows aligned inside each card group.
+				blank := "│" + strings.Repeat(" ", cw-2) + "│"
+				c = append(c[:len(c)-1], append([]string{blank}, c[len(c)-1:]...)...)
+			}
+			cards[i] = c
 		}
 		for line := range cards[0] {
 			parts := make([]string, 0, len(cards))

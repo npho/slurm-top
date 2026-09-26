@@ -38,6 +38,19 @@ func TestDashboard(t *testing.T) {
 		t.Fatal("missing terminal color")
 	}
 }
+func TestDashboardWrapsGPUCircles(t *testing.T) {
+	lines := card(Node{Name: "mig", State: "IDLE", GPUType: "h200-mig", GPUTotal: 12, GPUAllocated: 10}, 44, false)
+	gpuLines := 0
+	for _, line := range lines {
+		if strings.Contains(line, "●") || strings.Contains(line, "○") {
+			gpuLines++
+		}
+	}
+	if gpuLines != 2 {
+		t.Fatalf("GPU lines = %d, want 2: %q", gpuLines, lines)
+	}
+}
+
 func TestBarMissingAndClamp(t *testing.T) {
 	if bar(0, 0, 8) != "????????" || bar(30, 10, 8) != "████████" || bar(-1, 10, 8) != "░░░░░░░░" {
 		t.Fatal("bad bar")

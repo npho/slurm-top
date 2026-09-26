@@ -35,6 +35,33 @@ func TestGridPagesAndWidths(t *testing.T) {
 		t.Fatal("ANSI in non-terminal grid")
 	}
 }
+func TestGridNodeAt(t *testing.T) {
+	nodes := []Node{{Name: "g1", GPUTotal: 8}, {Name: "g2", GPUTotal: 12}, {Name: "g3", GPUTotal: 8}}
+	// Grid header occupies rows 0-2; g2 makes the first tile group two rows.
+	if got := gridNodeAt(nodes, 50, 3, 1); got != 0 {
+		t.Fatalf("first node = %d", got)
+	}
+	if got := gridNodeAt(nodes, 50, 4, 26); got != 1 {
+		t.Fatalf("wrapped node = %d", got)
+	}
+	if got := gridNodeAt(nodes, 50, 5, 1); got != 2 {
+		t.Fatalf("second grid row = %d", got)
+	}
+	if got := gridNodeAt(nodes, 50, 3, 25); got != -1 { // column separator
+		t.Fatalf("separator = %d", got)
+	}
+}
+
+func TestGPUCircleRowsWrapAtEight(t *testing.T) {
+	if got := gpuGlyphRows(10, 12, 8); len(got) != 2 || got[0] != "●●●●●●●●" || got[1] != "●●○○" {
+		t.Fatalf("GPU rows = %q", got)
+	}
+	lines := gridTileLines(Node{Name: "mig", State: "IDLE", GPUTotal: 12, GPUAllocated: 10}, false, tileWidth)
+	if len(lines) != 2 || !strings.Contains(lines[0], "●●●●●●●●") || !strings.Contains(lines[1], "●●○○") {
+		t.Fatalf("grid tile lines = %q", lines)
+	}
+}
+
 func TestGridStatusWithoutColor(t *testing.T) {
 	for _, tc := range []struct{ state, marker string }{{"DOWN", "×"}, {"RESERVED", "R"}, {"PLANNED", "P"}, {"IDLE", "○"}} {
 		n := Node{Name: "g1", State: tc.state, GPUTotal: 4, GPUAllocated: 0}

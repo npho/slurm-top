@@ -45,31 +45,29 @@ func gridHeader(nodes []Node, at time.Time) string {
 	}
 	return fmt.Sprintf("Slurm GPU health  %s\n%d nodes  •  GPUs %d/%d allocated  •  %d free  •  %d restricted/unavailable\n● allocated  ○ free  R reserved  P planned  × unavailable\n", at.Format("15:04:05"), len(nodes), alloc, total, free, bad)
 }
-func gridTile(n Node, color bool, width int) string {
+
+const gpuRowWidth = 8
+
+func gpuGlyphRows(allocated, total, width int) []string {
+	if total <= 0 || width < 1 {
+		return nil
+	}
+	allocated = min(max(allocated, 0), total)
+	rows := make([]string, 0, (total+width-1)/width)
+	for start := 0; start < total; start += width {
+		end := min(start+width, total)
+		filled := min(max(allocated-start, 0), end-start)
+		rows = append(rows, strings.Repeat("●", filled)+strings.Repeat("○", end-start-filled))
+	}
+	return rows
+}
+
+func gridTileLines(n Node, color bool, width int) []string {
+	return gridTileLinesSelected(n, color, width, false)
+}
+
+func gridTileLinesSelected(n Node, color bool, width int, selected bool) []string {
 	status, shade := nodeStatus(n)
-	// Keep the node's status visible even if its glyph sequence must be shortened.
-	label := ""
-	if n.GPUTotal > 0 {
-		label = fmt.Sprintf("%d/%d", n.GPUAllocated, n.GPUTotal)
-	}
-	glyphs := ""
-	if n.GPUTotal > 0 {
-		max := width - len([]rune(n.Name)) - len([]rune(label)) - 5
-		if max < 0 {
-			max = 0
-		}
-		if max > n.GPUTotal {
-			max = n.GPUTotal
-		}
-		allocated := n.GPUAllocated
-		if allocated > max {
-			allocated = max
-		}
-		glyphs = strings.Repeat("●", allocated) + strings.Repeat("○", max-allocated)
-		if max < n.GPUTotal && max > 0 {
-			glyphs = strings.TrimSuffix(glyphs, "○") + "…"
-		}
-	}
 	marker := "○"
 	switch {
 	case strings.HasPrefix(status, "×"):
@@ -85,14 +83,72 @@ func gridTile(n Node, color bool, width int) string {
 	case n.GPUAllocated > 0:
 		marker = "◐"
 	}
-	line := fit(fmt.Sprintf("%s %s %s %s", n.Name, marker, glyphs, label), width)
-	if color {
-		// Color the whole tile by health, retaining a text marker for NO_COLOR.
-		line = tint(line, shade, true)
+	label := ""
+	if n.GPUTotal > 0 {
+		label = fmt.Sprintf("%d/%d", n.GPUAllocated, n.GPUTotal)
 	}
-	return line
+	rows := gpuGlyphRows(n.GPUAllocated, n.GPUTotal, gpuRowWidth)
+	if len(rows) == 0 {
+		rows = []string{""}
+	}
+	indent := strings.Repeat(" ", len([]rune(n.Name))+3)
+	lines := make([]string, len(rows))
+	lines[0] = fit(fmt.Sprintf("%s %s %s %s", n.Name, marker, rows[0], label), width)
+	for i := 1; i < len(rows); i++ {
+		lines[i] = fit(indent+rows[i], width)
+	}
+	if color {
+		for i := range lines {
+			// Color the whole tile by health, retaining a text marker for NO_COLOR.
+			lines[i] = tint(lines[i], shade, true)
+		}
+	}
+	if selected {
+		for i := range lines {
+			lines[i] = "\x1b[7m" + lines[i] + "\x1b[27m"
+		}
+	}
+	return lines
 }
+
+func gridTile(n Node, color bool, width int) string {
+	return gridTileLines(n, color, width)[0]
+}
+
+// gridNodeAt returns the node under a 1-based terminal coordinate in the grid
+// body. bodyLine is zero-based and includes the grid's three-line header.
+func gridNodeAt(nodes []Node, width, bodyLine, x int) int {
+	if bodyLine < 3 || x < 1 {
+		return -1
+	}
+	column := (x - 1) / (tileWidth + 1)
+	if column >= gridColumns(width) || (x-1)%(tileWidth+1) >= tileWidth {
+		return -1
+	}
+	line := bodyLine - 3
+	columns := gridColumns(width)
+	for start := 0; start < len(nodes); start += columns {
+		rows := 1
+		for i := start; i < min(start+columns, len(nodes)); i++ {
+			rows = max(rows, len(gpuGlyphRows(nodes[i].GPUAllocated, nodes[i].GPUTotal, gpuRowWidth)))
+		}
+		if line < rows {
+			index := start + column
+			if index < len(nodes) {
+				return index
+			}
+			return -1
+		}
+		line -= rows
+	}
+	return -1
+}
+
 func renderGrid(w io.Writer, nodes []Node, at time.Time, width, page, pageSize int, color bool) error {
+	return renderGridSelected(w, nodes, at, width, page, pageSize, color, -1)
+}
+
+func renderGridSelected(w io.Writer, nodes []Node, at time.Time, width, page, pageSize int, color bool, selected int) error {
 	if width < tileWidth {
 		width = tileWidth
 	}
@@ -109,12 +165,25 @@ func renderGrid(w io.Writer, nodes []Node, at time.Time, width, page, pageSize i
 		end = start + pageSize
 	}
 	for i := start; i < end; i += columns {
-		parts := make([]string, 0, columns)
+		tiles := make([][]string, 0, columns)
+		rows := 0
 		for j := i; j < end && j < i+columns; j++ {
-			parts = append(parts, gridTile(nodes[j], color, tileWidth))
+			tile := gridTileLinesSelected(nodes[j], color, tileWidth, j == selected)
+			tiles = append(tiles, tile)
+			rows = max(rows, len(tile))
 		}
-		if _, err := fmt.Fprintln(w, strings.Join(parts, " ")); err != nil {
-			return err
+		for row := 0; row < rows; row++ {
+			parts := make([]string, len(tiles))
+			for column, tile := range tiles {
+				if row < len(tile) {
+					parts[column] = tile[row]
+				} else {
+					parts[column] = strings.Repeat(" ", tileWidth)
+				}
+			}
+			if _, err := fmt.Fprintln(w, strings.Join(parts, " ")); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
