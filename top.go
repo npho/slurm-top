@@ -71,6 +71,7 @@ type Snapshot struct {
 	Users                   []Usage   `json:"users"`
 	RunningJobs             int       `json:"running_jobs"`
 	PendingJobs             int       `json:"pending_jobs"`
+	ActiveAccounts          int       `json:"active_accounts"`
 	CapacityCPU             int       `json:"capacity_cpu"`
 	CapacityGPU             int       `json:"capacity_gpu"`
 	CapacityMemoryMB        int       `json:"capacity_memory_mb"`
@@ -180,6 +181,7 @@ func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 		}
 	}
 	users := map[string]*Usage{}
+	accounts := map[string]struct{}{}
 	for _, j := range response.Jobs {
 		if j.User == "" {
 			continue
@@ -198,6 +200,9 @@ func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 		}
 		j.User = printable(j.User)
 		j.Account = printable(j.Account)
+		if j.Account != "" {
+			accounts[j.Account] = struct{}{}
+		}
 		j.QoS = printable(j.QoS)
 		j.Partition = printable(j.Partition)
 		j.Name = printable(j.Name)
@@ -230,6 +235,7 @@ func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 	for _, u := range users {
 		snap.Users = append(snap.Users, *u)
 	}
+	snap.ActiveAccounts = len(accounts)
 	return snap, nil
 }
 func gpuFromTRES(s string) int { n, _ := gpuCount(s, ""); return n }
@@ -413,7 +419,7 @@ func topLines(s Snapshot, by string, width int) []string {
 		m += u.MemoryMB
 	}
 	lines := []string{
-		fmt.Sprintf("slurm-top  %s    %d users / %d running / %d pending", s.UpdatedAt.Format("15:04:05"), len(s.Users), s.RunningJobs, s.PendingJobs),
+		fmt.Sprintf("slurm-top  %s    %d users / %d accounts / %d running / %d pending", s.UpdatedAt.Format("15:04:05"), len(s.Users), s.ActiveAccounts, s.RunningJobs, s.PendingJobs),
 		fmt.Sprintf("GPU allocated  %s %d/%d", percentBar(g, s.CapacityGPU, 20), g, s.CapacityGPU),
 		fmt.Sprintf("CPU allocated  %s %d/%d", percentBar(c, s.CapacityCPU, 20), c, s.CapacityCPU),
 		fmt.Sprintf("MEM allocated  %s %s/%s TB", percentBar(m, s.CapacityMemoryMB, 20), tb(m), tb(s.CapacityMemoryMB)),

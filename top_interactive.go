@@ -563,7 +563,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 		}
 		var b bytes.Buffer
 		b.WriteString("\x1b[H\x1b[2J")
-		title := fmt.Sprintf("slurm-top  %s  %d users / %d running / %d pending", s.UpdatedAt.Format("15:04:05"), len(s.Users), s.RunningJobs, s.PendingJobs)
+		title := fmt.Sprintf("slurm-top  %s  %d users / %d accounts / %d running / %d pending", s.UpdatedAt.Format("15:04:05"), len(s.Users), s.ActiveAccounts, s.RunningJobs, s.PendingJobs)
 		if user != "" {
 			title += "  " + user
 		}

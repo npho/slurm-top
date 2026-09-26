@@ -21,7 +21,7 @@ func TestQueueAggregation(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if s.RunningJobs != 2 || s.PendingJobs != 1 || s.CapacityGPU != 4 || len(s.Users) != 2 {
+	if s.RunningJobs != 2 || s.PendingJobs != 1 || s.ActiveAccounts != 1 || s.CapacityGPU != 4 || len(s.Users) != 2 {
 		t.Fatalf("snapshot: %+v", s)
 	}
 	sortUsers(s.Users, "gpu")
@@ -32,7 +32,7 @@ func TestQueueAggregation(t *testing.T) {
 	if s.Users[1].MemoryMB != 512 {
 		t.Fatalf("plain MiB: %+v", s.Users[1])
 	}
-	if title := topLines(s, "gpu", 0)[0]; !strings.Contains(title, "2 users / 2 running / 1 pending") {
+	if title := topLines(s, "gpu", 0)[0]; !strings.Contains(title, "2 users / 1 accounts / 2 running / 1 pending") {
 		t.Fatalf("title: %q", title)
 	}
 	if len(s.Jobs) != 3 || s.Jobs[0].ID != 42 || s.Jobs[0].Account != "research" || s.Jobs[0].QoS != "normal" || s.Jobs[0].Partition != "gpu" || s.Jobs[0].Progress != 0 || s.Jobs[0].Elapsed != "0% [0-00:00|0-01:40]" {
