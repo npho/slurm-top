@@ -59,15 +59,17 @@ cycle through JOBS, GPU, and NODE. The selected user's jobs open from JOBS with
 Right or Enter. JOBS, GPU, and NODE can also be selected by clicking their menu
 items. A horizontal rule separates the menu from the
 current view. In GPU, directional arrows select a node in the displayed grid;
-clicking a node also selects it and opens its scrollable details window. Enter
-opens the selected node's window; Escape or clicking outside it closes it, and
-the mouse wheel scrolls it. In NODE, Up and Down or the mouse wheel scroll
-long content; n and p move five rows.
+clicking a node or Enter replaces the grid with that node's scrollable details.
+The details show node state and boot time followed by one ALLOCATED box with
+GPU, CPU, and memory allocation bars. H200 and H200-MIG allocations remain
+separate; generic GPUs remain generically labeled. Escape returns to the grid,
+and the mouse wheel scrolls the details. In NODE, Up and Down or the mouse
+wheel scroll long content; n and p move five rows.
 .PP
 Press Up from the first row to focus column headers. In header focus, use Left
 and Right to choose a column and Enter to sort it descending; a subsequent
 Enter changes the same column to ascending. Clicking a column header also
-sorts it. The keys
+sorts it. Clicking a summary row opens that user's jobs. The keys
 .BR g ,
 .BR c ,
 .BR m ,
@@ -91,7 +93,9 @@ field. Pending demand uses
 and is shown separately. Capacity is derived from
 .BR scontrol .
 CPU-per-GPU and memory-per-CPU values are ratios of scheduler allocations.
-Memory table values are decimal GB; aggregate memory summaries are decimal TB.
+Selected GPU-node details show the node-reported operating-system boot time when
+Slurm provides BootTime. Memory table values are decimal GB; aggregate memory
+summaries are decimal TB.
 .PP
 Job details include QoS, partition, progress, and elapsed/requested time.
 Elapsed time is formatted as

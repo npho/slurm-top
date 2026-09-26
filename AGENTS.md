@@ -83,7 +83,14 @@ sign packages; add a separate signing design before claiming signed artifacts.
 - Keep `tres_req_str` pending demand separate; never substitute requested
   resources for running allocations.
 - Treat capacity from `scontrol` as scheduler capacity, not telemetry.
-- Generic GPU TRES must not be mislabeled as H200 or MIG resources.
+- Generic GPU TRES must not be mislabeled as H200 or MIG resources. Preserve
+  typed GPU capacity and allocation breakdowns when rendering selected-node
+  details, and keep generic allocations generically labeled.
+- `BootTime` is node-reported operating-system boot metadata, distinct from
+  scheduler allocation or utilization. Keep it out of the stable JSON node
+  interface unless an explicit schema change is intended.
+- Keep preformatted node-detail status-box rows intact: do not pass their
+  spacing or borders through whitespace-normalizing text wrappers.
 - Treat `qos`, `partition`, start/end time, and time-limit fields from
   `squeue --json` as scheduler metadata. Elapsed and progress displays are
   schedule-time estimates, not measured job completion.

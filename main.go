@@ -23,11 +23,17 @@ import (
 
 // These are Slurm scheduler values, NOT sampled hardware utilization.
 type Node struct {
-	Name               string   `json:"name"`
-	State              string   `json:"state"`
-	GPUType            string   `json:"gpu_type,omitempty"`
-	GPUTotal           int      `json:"gpu_total"`
-	GPUAllocated       int      `json:"gpu_allocated"`
+	Name               string `json:"name"`
+	State              string `json:"state"`
+	GPUType            string `json:"gpu_type,omitempty"`
+	GPUTotal           int    `json:"gpu_total"`
+	GPUAllocated       int    `json:"gpu_allocated"`
+	h200Total          int
+	migTotal           int
+	h200Allocated      int
+	migAllocated       int
+	gpuAllocationTyped bool
+	bootTime           time.Time
 	CPUTotal           int      `json:"cpu_total"`
 	CPUAllocated       int      `json:"cpu_allocated"`
 	CPULoad            *float64 `json:"cpu_load,omitempty"` // Slurm-reported load average, not CPU percent.
@@ -95,6 +101,34 @@ func gpuCount(tres, gres string) (int, string) {
 	}
 	return total, typ
 }
+func hasTypedGPU(tres string) bool {
+	for _, part := range strings.Split(tres, ",") {
+		key, _, ok := strings.Cut(part, "=")
+		if ok && strings.HasPrefix(key, "gres/gpu:") {
+			return true
+		}
+	}
+	return false
+}
+
+func parseNodeTime(value string) (time.Time, bool) {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05"} {
+		var (
+			parsed time.Time
+			err    error
+		)
+		if layout == "2006-01-02T15:04:05" {
+			parsed, err = time.ParseInLocation(layout, value, time.Local)
+		} else {
+			parsed, err = time.Parse(layout, value)
+		}
+		if err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
+}
+
 func gpuType(tres, gres string) string {
 	typ := ""
 	for _, item := range strings.Split(tres, ",") {
@@ -137,6 +171,18 @@ func parseNodes(output string, all bool) []Node {
 		n := Node{Name: f["NodeName"], State: f["State"], GPUType: typ,
 			GPUTotal: total, GPUAllocated: allocated, CPUTotal: number(f["CPUEfctv"]),
 			CPUAllocated: number(f["CPUAlloc"]), MemoryTotalMB: number(f["RealMemory"]), MemoryAllocatedMB: number(f["AllocMem"])}
+		if hasTypedGPU(f["CfgTRES"]) {
+			gpuTypeCounts(f["CfgTRES"], &n.h200Total, &n.migTotal, new(int))
+		} else {
+			classifyGPU(typ, total, &n.h200Total, &n.migTotal, new(int))
+		}
+		if hasTypedGPU(f["AllocTRES"]) {
+			gpuTypeCounts(f["AllocTRES"], &n.h200Allocated, &n.migAllocated, new(int))
+			n.gpuAllocationTyped = true
+		}
+		if bootTime, ok := parseNodeTime(f["BootTime"]); ok {
+			n.bootTime = bootTime
+		}
 		if n.CPUTotal == 0 {
 			n.CPUTotal = number(f["CPUTot"])
 		}

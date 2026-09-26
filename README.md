@@ -101,15 +101,18 @@ the `JOBS` menu label. Use **Tab** and **Shift-Tab** to cycle through `JOBS`,
 **Right** or **Enter**. You can also click the `JOBS`, `GPU`, or `NODE` menu
 item to select it. A horizontal rule separates the menu from the
 current view. In `GPU`, directional arrows select nodes in the displayed grid;
-clicking a node also selects it and opens its scrollable details window. Press
-**Enter** to open the selected node's window; **Escape** or clicking outside it
-closes it, and the mouse wheel scrolls it. In `NODE`,
+clicking a node or pressing **Enter** replaces the grid with that node's
+scrollable details. The details begin with the node, state, and available boot
+time, followed by one `ALLOCATED` box containing GPU, CPU, and memory
+allocation bars. Typed H200 and H200-MIG GPU allocations are shown separately;
+generic GPU allocations remain generically labeled. Press **Escape** to return
+to the grid; the mouse wheel scrolls the details. In `NODE`,
 **Up/Down** or the mouse wheel scrolls long content (`n`/`p` move five rows).
 
 Press **Up** from the first row to focus the column header; use **Left/Right**
 to choose a column and **Enter** to sort it descending, then ascending on the
 next Enter. Click a column heading to sort (click again to reverse it), or
-click a row to select it. In a job table that is wider than the terminal, use
+click a summary row to open that user's jobs. In a job table that is wider than the terminal, use
 **Left/Right** while a row is focused to scroll horizontally; **Left** at its
 left edge returns to the summary. Keyboard sorting shortcuts are `g` (GPU),
 `c` (CPU), `m` (memory), `j` (running jobs), and `u` (username); `r` refreshes;
@@ -130,6 +133,8 @@ color in supported node displays.
 - Pending demand comes from `tres_req_str` and is shown separately from live
   allocations.
 - Capacity comes from `scontrol show node -o`.
+- Selected GPU-node details show `BootTime` as the node-reported operating
+  system boot time when Slurm provides it.
 - The interactive header uses separate CPU, memory, and GPU boxes. Allocation
   bars use capacity on allocatable nodes only; the non-bold line beneath each
   bar reports unschedulable capacity as a share of all scheduler capacity. GPU

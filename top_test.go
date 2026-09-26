@@ -192,6 +192,20 @@ func TestMouseAndArrows(t *testing.T) {
 		}
 	}
 }
+func TestClickedTableRow(t *testing.T) {
+	if row, ok := clickedTableRow(7, 5, 24, 3, 10); !ok || row != 4 {
+		t.Fatalf("clicked row = %d, %t; want 4, true", row, ok)
+	}
+	for _, y := range []int{5, 24} {
+		if _, ok := clickedTableRow(y, 5, 24, 0, 10); ok {
+			t.Fatalf("row at y=%d should not be selectable", y)
+		}
+	}
+	if _, ok := clickedTableRow(20, 5, 24, 0, 2); ok {
+		t.Fatal("blank table area should not select a row")
+	}
+}
+
 func TestEscapeEvent(t *testing.T) {
 	in, out, err := os.Pipe()
 	if err != nil {
@@ -262,27 +276,69 @@ func TestTopPaneCycling(t *testing.T) {
 	}
 }
 
-func TestNodePopup(t *testing.T) {
+func TestNodeDetails(t *testing.T) {
 	if !jobRunsOnNode("g[001-002],g010", "g002") || jobRunsOnNode("g[001-002]", "g003") {
 		t.Fatal("hostlist matching")
 	}
-	wrapped := wrapPopupText("Reason: this message wraps without truncating", 12)
+	wrapped := wrapPaneText("Reason: this message wraps without truncating", 12)
 	if len(wrapped) < 2 || !strings.Contains(strings.Join(wrapped, " "), "without truncating") {
-		t.Fatalf("wrapped popup text = %q", wrapped)
+		t.Fatalf("wrapped details text = %q", wrapped)
 	}
 	free := 1024
-	lines := nodePopup(Node{Name: "g001", State: "MIXED", GPUType: "h200-mig", GPUTotal: 12, GPUAllocated: 10, CPUTotal: 64, CPUAllocated: 32, MemoryTotalMB: 32768, MemoryFreeMB: &free, Reason: "maintenance"}, nil, 80, 10, 0)
 	jobs := []Job{{ID: 42, User: "alice", Account: "research", State: "RUNNING", GPUs: 2, CPUs: 8, MemoryMB: 16384, nodes: "g[001-002]"}}
-	lines = nodePopup(Node{Name: "g001", State: "MIXED", GPUType: "h200-mig", GPUTotal: 12, GPUAllocated: 10, CPUTotal: 64, CPUAllocated: 32, MemoryTotalMB: 32768, MemoryAllocatedMB: 16384, MemoryFreeMB: &free, Reason: "maintenance"}, jobs, 80, 10, 0)
-	if len(lines) != 10 || !strings.Contains(strings.Join(lines, "\n"), "Node: g001 State: MIXED") || !strings.Contains(strings.Join(lines, "\n"), "maintenance") || !strings.Contains(strings.Join(lines, "\n"), "Job 42 User: alice") {
-		t.Fatalf("popup = %q", lines)
+	node := Node{Name: "g001", State: "MIXED", GPUType: "h200-mig", GPUTotal: 12, GPUAllocated: 10, migTotal: 12, migAllocated: 10, gpuAllocationTyped: true, CPUTotal: 64, CPUAllocated: 32, MemoryTotalMB: 32768, MemoryAllocatedMB: 16384, MemoryFreeMB: &free, bootTime: time.Date(2025, time.January, 2, 3, 4, 5, 0, time.UTC), Reason: "maintenance"}
+	lines := nodeDetails(node, jobs, 80, 10, 0, false)
+	contents := strings.Join(lines, "\n")
+	for _, want := range []string{"Node: g001    State: MIXED    Booted: 03:04:05 on January 02, 2025", "╭─ ALLOCATED", "GPU", "H200-MIG", "CPU", "MEM", "32/64", "10/12", "17/34 GB", "maintenance", "Job 42 User: alice"} {
+		if !strings.Contains(contents, want) {
+			t.Errorf("details missing %q: %q", want, lines)
+		}
 	}
-	if visibleWidth(lines[0]) != 72 { // fixed 70-cell inner width plus borders
-		t.Fatalf("popup width = %d, want 72", visibleWidth(lines[0]))
+	if strings.Contains(contents, "Free memory:") {
+		t.Fatalf("free-memory row remains: %q", lines)
 	}
-	scrolling := nodePopup(Node{Name: "g001", Reason: strings.Repeat("long detail ", 12)}, nil, 30, 5, 0)
+	for _, removed := range []string{"╭─ GPU", "╭─ CPU", "╭─ MEM"} {
+		if strings.Contains(contents, removed) {
+			t.Fatalf("individual resource box remains: %q", lines)
+		}
+	}
+	if strings.Contains(contents, "\x1b[") {
+		t.Fatalf("uncolored details contain ANSI: %q", lines)
+	}
+	if visibleWidth(lines[0]) != 80 || strings.Contains(lines[0], "╭") {
+		t.Fatalf("details should fill the pane, got %q", lines[0])
+	}
+	colored := nodeDetails(Node{GPUTotal: 4, GPUAllocated: 2}, nil, 80, 5, 0, true)
+	if !strings.Contains(strings.Join(colored, ""), "\x1b[38;2;") {
+		t.Fatalf("missing colored allocation bar: %q", colored)
+	}
+	scrolling := nodeDetails(Node{Name: "g001", Reason: strings.Repeat("long detail ", 12)}, nil, 30, 5, 0, false)
 	if !strings.Contains(strings.Join(scrolling, ""), "█") || !strings.Contains(strings.Join(scrolling, ""), "░") {
-		t.Fatalf("missing popup scroll indicator: %q", scrolling)
+		t.Fatalf("missing details scroll indicator: %q", scrolling)
+	}
+}
+
+func TestNodeGPUStatusBars(t *testing.T) {
+	hybrid := Node{GPUTotal: 68, GPUAllocated: 14, h200Total: 8, migTotal: 60, h200Allocated: 2, migAllocated: 12, gpuAllocationTyped: true}
+	lines := strings.Join(nodeStatusBars(hybrid, 200, false), "\n")
+	for _, want := range []string{"╭─ ALLOCATED", "H200 ", "H200-MIG ", "2/8", "12/60"} {
+		if !strings.Contains(lines, want) {
+			t.Errorf("hybrid status bars missing %q: %q", want, lines)
+		}
+	}
+	heading := sgrPattern.ReplaceAllString(nodeStatusBars(hybrid, 200, false)[1], "")
+	for _, label := range []string{"GPU", "CPU", "MEM"} {
+		if !strings.Contains(heading, label) {
+			t.Errorf("missing %s heading in %q", label, heading)
+		}
+	}
+	single := strings.Join(nodeStatusBars(Node{GPUTotal: 8, h200Total: 8, GPUType: "h200"}, 200, false), "\n")
+	if !strings.Contains(single, "H200 ") || strings.Contains(single, "H200-MIG") {
+		t.Fatalf("single-type status bars = %q", single)
+	}
+	noGPU := strings.Join(nodeStatusBars(Node{CPUTotal: 64, MemoryTotalMB: 32768}, 200, false), "\n")
+	if strings.Contains(noGPU, "GPU ") {
+		t.Fatalf("GPU bar shown without GPUs: %q", noGPU)
 	}
 }
 
