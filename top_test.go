@@ -175,6 +175,14 @@ func TestBarColors(t *testing.T) {
 		}
 	}
 }
+func TestUsagePairAlignment(t *testing.T) {
+	primary, unavailable := usagePair(usageValueFor(1, 3, "1", "3", true), usageValueFor(20, 100, "20", "100", false))
+	primary, unavailable = sgrPattern.ReplaceAllString(primary, ""), sgrPattern.ReplaceAllString(unavailable, "")
+	if strings.IndexByte(primary, '%') != strings.IndexByte(unavailable, '%') || strings.IndexByte(primary, '/') != strings.IndexByte(unavailable, '/') {
+		t.Fatalf("misaligned usage rows: %q / %q", primary, unavailable)
+	}
+}
+
 func TestHorizontalBars(t *testing.T) {
 	s := Snapshot{CapacityCPU: 64, CapacityMemoryMB: 65536, AllocatableCPU: 64, AllocatableMemoryMB: 65536, AllocatableCPUUsed: 32, AllocatableMemoryUsedMB: 32768, H200Capacity: 8, AllocatableH200: 8, AllocatableH200Used: 4, MIGCapacity: 56, AllocatableMIG: 56, AllocatableMIGUsed: 12, H200Allocated: 4, MIGAllocated: 12, Users: []Usage{{CPUs: 32, MemoryMB: 32768}}}
 	wide := horizontalBars(s, 180)

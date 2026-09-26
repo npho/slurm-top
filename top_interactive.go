@@ -372,16 +372,35 @@ var sgrPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func visibleWidth(s string) int { return utf8.RuneCountInString(sgrPattern.ReplaceAllString(s, "")) }
 
-func usageInfo(used, total int, usedText, totalText string, bold bool) string {
+type usageValue struct {
+	percent string
+	used    string
+	total   string
+	bold    bool
+}
+
+func usageValueFor(used, total int, usedText, totalText string, bold bool) usageValue {
 	percent := 0.0
 	if total > 0 {
 		percent = float64(used) * 100 / float64(total)
 	}
-	percentText := strings.TrimSuffix(fmt.Sprintf("%.1f", percent), ".0") + "%"
-	if bold {
-		percentText = "\x1b[1m" + percentText + "\x1b[0m"
+	return usageValue{strings.TrimSuffix(fmt.Sprintf("%.1f", percent), ".0") + "%", usedText, totalText, bold}
+}
+
+// usagePair aligns percent signs and slash separators across allocation and
+// unschedulable-capacity rows before their widths are used for status bars.
+func usagePair(primary, secondary usageValue) (string, string) {
+	percentWidth := max(visibleWidth(primary.percent), visibleWidth(secondary.percent))
+	usedWidth := max(visibleWidth(primary.used), visibleWidth(secondary.used))
+	render := func(value usageValue) string {
+		percent := strings.Repeat(" ", percentWidth-visibleWidth(value.percent)) + value.percent
+		if value.bold {
+			percent = "\x1b[1m" + percent + "\x1b[0m"
+		}
+		used := strings.Repeat(" ", usedWidth-visibleWidth(value.used)) + value.used
+		return percent + "  " + used + "/" + value.total
 	}
-	return percentText + "  " + usedText + "/" + totalText
+	return render(primary), render(secondary)
 }
 
 func statBox(label string, content ...string) []string {
@@ -411,14 +430,18 @@ func joinStatBoxes(boxes ...[]string) []string {
 func horizontalBars(s Snapshot, width int, colored ...bool) []string {
 	cpu, mem := s.AllocatableCPUUsed, s.AllocatableMemoryUsedMB
 	enabled := len(colored) > 0 && colored[0]
-	cpuInfo := usageInfo(cpu, s.AllocatableCPU, strconv.Itoa(cpu), strconv.Itoa(s.AllocatableCPU), true)
-	memInfo := usageInfo(mem, s.AllocatableMemoryMB, tb(mem), tb(s.AllocatableMemoryMB)+" TB", true)
-	h200Info := usageInfo(s.AllocatableH200Used, s.AllocatableH200, strconv.Itoa(s.AllocatableH200Used), strconv.Itoa(s.AllocatableH200), true)
-	migInfo := usageInfo(s.AllocatableMIGUsed, s.AllocatableMIG, strconv.Itoa(s.AllocatableMIGUsed), strconv.Itoa(s.AllocatableMIG), true)
-	cpuUnavailable := usageInfo(s.CapacityCPU-s.AllocatableCPU, s.CapacityCPU, strconv.Itoa(s.CapacityCPU-s.AllocatableCPU), strconv.Itoa(s.CapacityCPU), false)
-	memUnavailable := usageInfo(s.CapacityMemoryMB-s.AllocatableMemoryMB, s.CapacityMemoryMB, tb(s.CapacityMemoryMB-s.AllocatableMemoryMB), tb(s.CapacityMemoryMB)+" TB", false)
-	h200Unavailable := usageInfo(s.H200Capacity-s.AllocatableH200, s.H200Capacity, strconv.Itoa(s.H200Capacity-s.AllocatableH200), strconv.Itoa(s.H200Capacity), false)
-	migUnavailable := usageInfo(s.MIGCapacity-s.AllocatableMIG, s.MIGCapacity, strconv.Itoa(s.MIGCapacity-s.AllocatableMIG), strconv.Itoa(s.MIGCapacity), false)
+	cpuInfo, cpuUnavailable := usagePair(
+		usageValueFor(cpu, s.AllocatableCPU, strconv.Itoa(cpu), strconv.Itoa(s.AllocatableCPU), true),
+		usageValueFor(s.CapacityCPU-s.AllocatableCPU, s.CapacityCPU, strconv.Itoa(s.CapacityCPU-s.AllocatableCPU), strconv.Itoa(s.CapacityCPU), false))
+	memInfo, memUnavailable := usagePair(
+		usageValueFor(mem, s.AllocatableMemoryMB, tb(mem), tb(s.AllocatableMemoryMB)+" TB", true),
+		usageValueFor(s.CapacityMemoryMB-s.AllocatableMemoryMB, s.CapacityMemoryMB, tb(s.CapacityMemoryMB-s.AllocatableMemoryMB), tb(s.CapacityMemoryMB)+" TB", false))
+	h200Info, h200Unavailable := usagePair(
+		usageValueFor(s.AllocatableH200Used, s.AllocatableH200, strconv.Itoa(s.AllocatableH200Used), strconv.Itoa(s.AllocatableH200), true),
+		usageValueFor(s.H200Capacity-s.AllocatableH200, s.H200Capacity, strconv.Itoa(s.H200Capacity-s.AllocatableH200), strconv.Itoa(s.H200Capacity), false))
+	migInfo, migUnavailable := usagePair(
+		usageValueFor(s.AllocatableMIGUsed, s.AllocatableMIG, strconv.Itoa(s.AllocatableMIGUsed), strconv.Itoa(s.AllocatableMIG), true),
+		usageValueFor(s.MIGCapacity-s.AllocatableMIG, s.MIGCapacity, strconv.Itoa(s.MIGCapacity-s.AllocatableMIG), strconv.Itoa(s.MIGCapacity), false))
 	cpuBox := statBox("CPU", coloredBar(cpu, s.AllocatableCPU, visibleWidth(cpuInfo), enabled), cpuInfo, cpuUnavailable)
 	memBox := statBox("MEM", coloredBar(mem, s.AllocatableMemoryMB, visibleWidth(memInfo), enabled), memInfo, memUnavailable)
 	h200Label, migLabel := "H200 ", "H200-MIG "
