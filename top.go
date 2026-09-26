@@ -67,20 +67,25 @@ type Usage struct {
 	// are not hardware usage and sstat denies access to other users' steps.
 }
 type Snapshot struct {
-	UpdatedAt         time.Time `json:"updated_at"`
-	Users             []Usage   `json:"users"`
-	RunningJobs       int       `json:"running_jobs"`
-	PendingJobs       int       `json:"pending_jobs"`
-	CapacityCPU       int       `json:"capacity_cpu"`
-	CapacityGPU       int       `json:"capacity_gpu"`
-	CapacityMemoryMB  int       `json:"capacity_memory_mb"`
-	H200Capacity      int       `json:"h200_capacity"`
-	H200Allocated     int       `json:"h200_allocated"`
-	MIGCapacity       int       `json:"mig_capacity"`
-	MIGAllocated      int       `json:"mig_allocated"`
-	OtherGPUCapacity  int       `json:"other_gpu_capacity"`
-	OtherGPUAllocated int       `json:"other_gpu_allocated"`
-	Jobs              []Job     `json:"jobs"`
+	UpdatedAt           time.Time `json:"updated_at"`
+	Users               []Usage   `json:"users"`
+	RunningJobs         int       `json:"running_jobs"`
+	PendingJobs         int       `json:"pending_jobs"`
+	CapacityCPU         int       `json:"capacity_cpu"`
+	CapacityGPU         int       `json:"capacity_gpu"`
+	CapacityMemoryMB    int       `json:"capacity_memory_mb"`
+	AllocatableCPU      int       `json:"allocatable_cpu"`
+	AllocatableGPU      int       `json:"allocatable_gpu"`
+	AllocatableMemoryMB int       `json:"allocatable_memory_mb"`
+	H200Capacity        int       `json:"h200_capacity"`
+	AllocatableH200     int       `json:"allocatable_h200"`
+	H200Allocated       int       `json:"h200_allocated"`
+	MIGCapacity         int       `json:"mig_capacity"`
+	AllocatableMIG      int       `json:"allocatable_mig"`
+	MIGAllocated        int       `json:"mig_allocated"`
+	OtherGPUCapacity    int       `json:"other_gpu_capacity"`
+	OtherGPUAllocated   int       `json:"other_gpu_allocated"`
+	Jobs                []Job     `json:"jobs"`
 }
 
 func tresValue(tres, key string) string {
@@ -152,11 +157,18 @@ func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 		return Snapshot{}, fmt.Errorf("decode squeue JSON: %w", err)
 	}
 	snap := Snapshot{UpdatedAt: at, Users: []Usage{}, Jobs: []Job{}}
+	ignoredOther := 0
 	for _, n := range nodes {
 		snap.CapacityCPU += n.CPUTotal
 		snap.CapacityGPU += n.GPUTotal
 		classifyGPU(n.GPUType, n.GPUTotal, &snap.H200Capacity, &snap.MIGCapacity, &snap.OtherGPUCapacity)
 		snap.CapacityMemoryMB += n.MemoryTotalMB
+		if !unavailable(n.State) {
+			snap.AllocatableCPU += n.CPUTotal
+			snap.AllocatableGPU += n.GPUTotal
+			snap.AllocatableMemoryMB += n.MemoryTotalMB
+			classifyGPU(n.GPUType, n.GPUTotal, &snap.AllocatableH200, &snap.AllocatableMIG, &ignoredOther)
+		}
 	}
 	users := map[string]*Usage{}
 	for _, j := range response.Jobs {

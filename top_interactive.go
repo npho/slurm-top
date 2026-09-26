@@ -372,24 +372,28 @@ var sgrPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func visibleWidth(s string) int { return utf8.RuneCountInString(sgrPattern.ReplaceAllString(s, "")) }
 
-func usageInfo(used, total int, usedText, totalText string) string {
+func usageInfo(used, total int, usedText, totalText string, bold bool) string {
 	percent := 0.0
 	if total > 0 {
 		percent = float64(used) * 100 / float64(total)
 	}
-	percentText := fmt.Sprintf("%.1f", percent)
-	percentText = strings.TrimSuffix(percentText, ".0")
-	return "\x1b[1m" + percentText + "%\x1b[0m  " + usedText + "/" + totalText
+	percentText := strings.TrimSuffix(fmt.Sprintf("%.1f", percent), ".0") + "%"
+	if bold {
+		percentText = "\x1b[1m" + percentText + "\x1b[0m"
+	}
+	return percentText + "  " + usedText + "/" + totalText
 }
 
-func statBox(label, status, info string) []string {
-	inner := max(visibleWidth(status), visibleWidth(info))
-	return []string{
-		"╭─ " + label + " " + strings.Repeat("─", max(0, inner-visibleWidth(label)-3)) + "╮",
-		"│" + fitANSI(status, inner) + "│",
-		"│" + fitANSI(info, inner) + "│",
-		"╰" + strings.Repeat("─", inner) + "╯",
+func statBox(label string, content ...string) []string {
+	inner := 0
+	for _, line := range content {
+		inner = max(inner, visibleWidth(line))
 	}
+	result := []string{"╭─ " + label + " " + strings.Repeat("─", max(0, inner-visibleWidth(label)-3)) + "╮"}
+	for _, line := range content {
+		result = append(result, "│"+fitANSI(line, inner)+"│")
+	}
+	return append(result, "╰"+strings.Repeat("─", inner)+"╯")
 }
 
 func joinStatBoxes(boxes ...[]string) []string {
@@ -411,16 +415,21 @@ func horizontalBars(s Snapshot, width int, colored ...bool) []string {
 		mem += u.MemoryMB
 	}
 	enabled := len(colored) > 0 && colored[0]
-	cpuInfo := usageInfo(cpu, s.CapacityCPU, strconv.Itoa(cpu), strconv.Itoa(s.CapacityCPU))
-	memInfo := usageInfo(mem, s.CapacityMemoryMB, tb(mem), tb(s.CapacityMemoryMB)+" TB")
-	h200Info := usageInfo(s.H200Allocated, s.H200Capacity, strconv.Itoa(s.H200Allocated), strconv.Itoa(s.H200Capacity))
-	migInfo := usageInfo(s.MIGAllocated, s.MIGCapacity, strconv.Itoa(s.MIGAllocated), strconv.Itoa(s.MIGCapacity))
-	cpuBox := statBox("CPU", coloredBar(cpu, s.CapacityCPU, visibleWidth(cpuInfo), enabled), cpuInfo)
-	memBox := statBox("MEM", coloredBar(mem, s.CapacityMemoryMB, visibleWidth(memInfo), enabled), memInfo)
+	cpuInfo := usageInfo(cpu, s.AllocatableCPU, strconv.Itoa(cpu), strconv.Itoa(s.AllocatableCPU), true)
+	memInfo := usageInfo(mem, s.AllocatableMemoryMB, tb(mem), tb(s.AllocatableMemoryMB)+" TB", true)
+	h200Info := usageInfo(s.H200Allocated, s.AllocatableH200, strconv.Itoa(s.H200Allocated), strconv.Itoa(s.AllocatableH200), true)
+	migInfo := usageInfo(s.MIGAllocated, s.AllocatableMIG, strconv.Itoa(s.MIGAllocated), strconv.Itoa(s.AllocatableMIG), true)
+	cpuUnavailable := usageInfo(s.CapacityCPU-s.AllocatableCPU, s.CapacityCPU, strconv.Itoa(s.CapacityCPU-s.AllocatableCPU), strconv.Itoa(s.CapacityCPU), false)
+	memUnavailable := usageInfo(s.CapacityMemoryMB-s.AllocatableMemoryMB, s.CapacityMemoryMB, tb(s.CapacityMemoryMB-s.AllocatableMemoryMB), tb(s.CapacityMemoryMB)+" TB", false)
+	h200Unavailable := usageInfo(s.H200Capacity-s.AllocatableH200, s.H200Capacity, strconv.Itoa(s.H200Capacity-s.AllocatableH200), strconv.Itoa(s.H200Capacity), false)
+	migUnavailable := usageInfo(s.MIGCapacity-s.AllocatableMIG, s.MIGCapacity, strconv.Itoa(s.MIGCapacity-s.AllocatableMIG), strconv.Itoa(s.MIGCapacity), false)
+	cpuBox := statBox("CPU", coloredBar(cpu, s.AllocatableCPU, visibleWidth(cpuInfo), enabled), cpuInfo, cpuUnavailable)
+	memBox := statBox("MEM", coloredBar(mem, s.AllocatableMemoryMB, visibleWidth(memInfo), enabled), memInfo, memUnavailable)
 	h200Label, migLabel := "H200 ", "H200-MIG "
-	gpuStatus := h200Label + coloredBar(s.H200Allocated, s.H200Capacity, visibleWidth(h200Info), enabled) + "  " + migLabel + coloredBar(s.MIGAllocated, s.MIGCapacity, visibleWidth(migInfo), enabled)
+	gpuStatus := h200Label + coloredBar(s.H200Allocated, s.AllocatableH200, visibleWidth(h200Info), enabled) + "  " + migLabel + coloredBar(s.MIGAllocated, s.AllocatableMIG, visibleWidth(migInfo), enabled)
 	gpuInfo := strings.Repeat(" ", visibleWidth(h200Label)) + h200Info + "  " + strings.Repeat(" ", visibleWidth(migLabel)) + migInfo
-	gpuBox := statBox("GPU", gpuStatus, gpuInfo)
+	gpuUnavailable := strings.Repeat(" ", visibleWidth(h200Label)) + h200Unavailable + "  " + strings.Repeat(" ", visibleWidth(migLabel)) + migUnavailable
+	gpuBox := statBox("GPU", gpuStatus, gpuInfo, gpuUnavailable)
 	all := joinStatBoxes(cpuBox, memBox, gpuBox)
 	if width >= visibleWidth(all[0]) {
 		return all

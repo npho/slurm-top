@@ -120,9 +120,11 @@ color in supported node displays.
 - Pending demand comes from `tres_req_str` and is shown separately from live
   allocations.
 - Capacity comes from `scontrol show node -o`.
-- The interactive header uses separate CPU, memory, and GPU boxes. GPU shows
-  H200 and H200-MIG allocations separately; generic or other GPU types remain
-  part of aggregate GPU totals but not those typed bars.
+- The interactive header uses separate CPU, memory, and GPU boxes. Allocation
+  bars use capacity on allocatable nodes only; the non-bold line beneath each
+  bar reports unschedulable capacity as a share of all scheduler capacity. GPU
+  shows H200 and H200-MIG allocations separately; generic or other GPU types
+  remain part of aggregate GPU totals but not those typed bars.
 - Job QoS, partition, start/end time, and requested time limit come from
   `squeue --json`. Elapsed time is rendered as
   `percent% [elapsed|requested]`; unknown or unlimited requested time displays
