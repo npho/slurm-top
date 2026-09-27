@@ -284,12 +284,12 @@ func TestNodeDetails(t *testing.T) {
 	if len(wrapped) < 2 || !strings.Contains(strings.Join(wrapped, " "), "without truncating") {
 		t.Fatalf("wrapped details text = %q", wrapped)
 	}
-	free := 1024
+	free, used := 1024, 32768-1024
 	jobs := []Job{{ID: 42, User: "alice", Account: "research", State: "RUNNING", GPUs: 2, CPUs: 8, MemoryMB: 16384, nodes: "g[001-002]"}}
-	node := Node{Name: "g001", State: "MIXED", GPUType: "h200-mig", GPUTotal: 12, GPUAllocated: 10, migTotal: 12, migAllocated: 10, gpuAllocationTyped: true, CPUTotal: 64, CPUAllocated: 32, MemoryTotalMB: 32768, MemoryAllocatedMB: 16384, MemoryFreeMB: &free, bootTime: time.Date(2025, time.January, 2, 3, 4, 5, 0, time.UTC), Reason: "maintenance"}
-	lines := nodeDetails(node, jobs, 80, 10, 0, false)
+	node := Node{Name: "g001", State: "MIXED", GPUType: "h200-mig", GPUTotal: 12, GPUAllocated: 10, migTotal: 12, migAllocated: 10, gpuAllocationTyped: true, CPUTotal: 64, CPUAllocated: 32, MemoryTotalMB: 32768, MemoryAllocatedMB: 16384, MemoryFreeMB: &free, MemoryUsedApproxMB: &used, bootTime: time.Date(2025, time.January, 2, 3, 4, 5, 0, time.UTC), Reason: "maintenance"}
+	lines := nodeDetails(node, jobs, 80, 20, 0, false)
 	contents := strings.Join(lines, "\n")
-	for _, want := range []string{"Node: g001    State: MIXED    Booted: 03:04:05 on January 02, 2025", "╭─ ALLOCATED", "GPU", "H200-MIG", "CPU", "MEM", "32/64", "10/12", "17/34 GB", "maintenance", "Job 42 User: alice"} {
+	for _, want := range []string{"Node: g001    State: MIXED    Booted: 03:04:05 on January 02, 2025", "╭─ ALLOCATED", "╭─ UTILIZED", "GPU", "GPU MEM", "H200-MIG", "CPU", "MEM", "32/64", "10/12", "17/34 GB", "?/10", "?/32", "33/17 GB", "maintenance", "╭─ 42 • alice • research", "GPU MEM", "?/2", "?/8", "?/17 GB"} {
 		if !strings.Contains(contents, want) {
 			t.Errorf("details missing %q: %q", want, lines)
 		}
@@ -339,6 +339,15 @@ func TestNodeGPUStatusBars(t *testing.T) {
 	noGPU := strings.Join(nodeStatusBars(Node{CPUTotal: 64, MemoryTotalMB: 32768}, 200, false), "\n")
 	if strings.Contains(noGPU, "GPU ") {
 		t.Fatalf("GPU bar shown without GPUs: %q", noGPU)
+	}
+	down := nodeStatusBars(Node{State: "DOWN", GPUTotal: 8, CPUTotal: 64, MemoryTotalMB: 32768}, 200, false)
+	if strings.Contains(strings.Join(down, "\n"), "?") || !strings.Contains(down[2], "░") {
+		t.Fatalf("zero allocated unavailable node should have empty bars: %q", down)
+	}
+	memoryInfo := sgrPattern.ReplaceAllString(down[3], "")
+	memoryUnavailable := sgrPattern.ReplaceAllString(down[4], "")
+	if strings.Index(memoryInfo, "GB") != strings.Index(memoryUnavailable, "GB") || strings.LastIndex(memoryInfo[:strings.Index(memoryInfo, "GB")], "%") != strings.LastIndex(memoryUnavailable[:strings.Index(memoryUnavailable, "GB")], "%") {
+		t.Fatalf("memory allocation rows are not aligned: %q / %q", memoryInfo, memoryUnavailable)
 	}
 }
 

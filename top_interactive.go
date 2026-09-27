@@ -442,7 +442,7 @@ func usageValueFor(used, total int, usedText, totalText string, bold bool) usage
 	if total > 0 {
 		percent = float64(used) * 100 / float64(total)
 	}
-	return usageValue{strings.TrimSuffix(fmt.Sprintf("%.1f", percent), ".0") + "%", usedText, totalText, bold}
+	return usageValue{fmt.Sprintf("%.0f%%", percent), usedText, totalText, bold}
 }
 
 // usagePair aligns percent signs and slash separators across allocation and
@@ -450,13 +450,15 @@ func usageValueFor(used, total int, usedText, totalText string, bold bool) usage
 func usagePair(primary, secondary usageValue) (string, string) {
 	percentWidth := max(visibleWidth(primary.percent), visibleWidth(secondary.percent))
 	usedWidth := max(visibleWidth(primary.used), visibleWidth(secondary.used))
+	totalWidth := max(visibleWidth(primary.total), visibleWidth(secondary.total))
 	render := func(value usageValue) string {
 		percent := strings.Repeat(" ", percentWidth-visibleWidth(value.percent)) + value.percent
 		if value.bold {
 			percent = "\x1b[1m" + percent + "\x1b[0m"
 		}
 		used := strings.Repeat(" ", usedWidth-visibleWidth(value.used)) + value.used
-		return percent + "  " + used + "/" + value.total
+		total := strings.Repeat(" ", totalWidth-visibleWidth(value.total)) + value.total
+		return percent + "  " + used + "/" + total
 	}
 	return render(primary), render(secondary)
 }
@@ -733,22 +735,7 @@ func nodeGPUContent(n Node, available, color bool) nodeBarContent {
 
 // nodeStatusBars mirrors the cluster summary for one node inside one
 // allocation box. The final row is capacity unavailable for scheduling.
-func nodeStatusBars(n Node, _ int, color bool) []string {
-	available := !unavailable(n.State)
-	cpuUsable, memUsable := n.CPUTotal, n.MemoryTotalMB
-	cpuUsed, memUsed := n.CPUAllocated, n.MemoryAllocatedMB
-	if !available {
-		cpuUsable, memUsable, cpuUsed, memUsed = 0, 0, 0, 0
-	}
-	contents := []nodeBarContent{}
-	if n.GPUTotal > 0 {
-		contents = append(contents, nodeGPUContent(n, available, color))
-	}
-	cpu := nodeResourceContent("", cpuUsed, cpuUsable, n.CPUTotal, strconv.Itoa(cpuUsed), strconv.Itoa(cpuUsable), strconv.Itoa(n.CPUTotal-cpuUsable), strconv.Itoa(n.CPUTotal), color)
-	cpu.heading = "CPU"
-	mem := nodeResourceContent("", memUsed, memUsable, n.MemoryTotalMB, gb(memUsed), gb(memUsable)+" GB", gb(n.MemoryTotalMB-memUsable), gb(n.MemoryTotalMB)+" GB", color)
-	mem.heading = "MEM"
-	contents = append(contents, cpu, mem)
+func nodeBarBox(title string, contents []nodeBarContent) []string {
 	lines := nodeBarContent{}
 	for i, content := range contents {
 		if i > 0 {
@@ -764,7 +751,129 @@ func nodeStatusBars(n Node, _ int, color bool) []string {
 		lines.info += content.info
 		lines.unavailable += content.unavailable
 	}
-	return statBox("ALLOCATED", lines.heading, lines.status, lines.info, lines.unavailable)
+	if strings.TrimSpace(lines.unavailable) == "" {
+		return statBox(title, lines.heading, lines.status, lines.info)
+	}
+	return statBox(title, lines.heading, lines.status, lines.info, lines.unavailable)
+}
+
+// widenStatBox preserves a stat box's borders while extending it to width.
+// It operates on visible cells so ANSI-colored status bars remain intact.
+func widenStatBox(lines []string, width int) []string {
+	widened := append([]string(nil), lines...)
+	for i, line := range widened {
+		padding := width - visibleWidth(line)
+		if padding <= 0 {
+			continue
+		}
+		switch {
+		case i == 0:
+			widened[i] = strings.TrimSuffix(line, "╮") + strings.Repeat("─", padding) + "╮"
+		case i == len(widened)-1:
+			widened[i] = strings.TrimSuffix(line, "╯") + strings.Repeat("─", padding) + "╯"
+		default:
+			widened[i] = strings.TrimSuffix(line, "│") + strings.Repeat(" ", padding) + "│"
+		}
+	}
+	return widened
+}
+
+func nodeStatusContents(n Node, available, color bool) []nodeBarContent {
+	cpuUsable, memUsable := n.CPUTotal, n.MemoryTotalMB
+	cpuUsed, memUsed := n.CPUAllocated, n.MemoryAllocatedMB
+	if !available {
+		cpuUsable, memUsable, cpuUsed, memUsed = 0, 0, 0, 0
+	}
+	contents := []nodeBarContent{}
+	if n.GPUTotal > 0 {
+		contents = append(contents, nodeGPUContent(n, available, color))
+	}
+	cpu := nodeResourceContent("", cpuUsed, cpuUsable, n.CPUTotal, strconv.Itoa(cpuUsed), strconv.Itoa(cpuUsable), strconv.Itoa(n.CPUTotal-cpuUsable), strconv.Itoa(n.CPUTotal), color)
+	cpu.heading = "CPU"
+	mem := nodeResourceContent("", memUsed, memUsable, n.MemoryTotalMB, gb(memUsed), gb(memUsable)+" GB", gb(n.MemoryTotalMB-memUsable), gb(n.MemoryTotalMB)+" GB", color)
+	mem.heading = "MEM"
+	return append(contents, cpu, mem)
+}
+
+// nodeStatusBars mirrors the cluster summary for one node inside one
+// allocation box. The final row is capacity unavailable for scheduling.
+func nodeStatusBars(n Node, _ int, color bool) []string {
+	return nodeBarBox("ALLOCATED", nodeStatusContents(n, !unavailable(n.State), color))
+}
+
+func nodeUtilizationResourceContent(label string, used *int, total int, totalText string, color bool) nodeBarContent {
+	if total == 0 {
+		info := "0%  0/" + totalText
+		bar := coloredBar(0, 1, visibleWidth(info), color)
+		return nodeBarContent{status: label + bar, info: strings.Repeat(" ", visibleWidth(label)) + info, unavailable: strings.Repeat(" ", visibleWidth(label)+visibleWidth(info))}
+	}
+	if used == nil {
+		info := "?  ?/" + totalText
+		bar := strings.Repeat("?", visibleWidth(info))
+		if color {
+			bar = "\x1b[38;2;128;128;128m" + bar + "\x1b[0m"
+		}
+		return nodeBarContent{status: label + bar, info: strings.Repeat(" ", visibleWidth(label)) + info, unavailable: strings.Repeat(" ", visibleWidth(label)+visibleWidth(info))}
+	}
+	info := usageValueFor(*used, total, strconv.Itoa(*used), totalText, true)
+	if strings.HasSuffix(totalText, " GB") {
+		info = usageValueFor(*used, total, gb(*used), totalText, true)
+	}
+	text, _ := usagePair(info, usageValue{})
+	barWidth := visibleWidth(text)
+	return nodeBarContent{status: label + coloredBar(*used, total, barWidth, color), info: strings.Repeat(" ", visibleWidth(label)) + text, unavailable: strings.Repeat(" ", visibleWidth(label)+barWidth)}
+}
+
+func nodeUtilizationBars(n Node, _ int, color bool) []string {
+	available := !unavailable(n.State)
+	contents := []nodeBarContent{}
+	if n.GPUTotal > 0 {
+		gpu := nodeBarContent{heading: "GPU"}
+		for i, status := range nodeGPUStatuses(n, available) {
+			part := nodeUtilizationResourceContent(status.label, nil, status.used, strconv.Itoa(status.used), color)
+			if i > 0 {
+				gpu.status += "  "
+				gpu.info += "  "
+				gpu.unavailable += "  "
+			}
+			gpu.status += part.status
+			gpu.info += part.info
+			gpu.unavailable += part.unavailable
+		}
+		contents = append(contents, gpu)
+	}
+	// Utilization is measured against the resources Slurm allocated above, not
+	// the node's total scheduler capacity.
+	cpuTotal, memoryTotal := n.CPUAllocated, n.MemoryAllocatedMB
+	memoryUsed := n.MemoryUsedApproxMB
+	if !available {
+		cpuTotal, memoryTotal, memoryUsed = 0, 0, nil
+	}
+	if n.GPUTotal > 0 {
+		gpuMemory := nodeUtilizationResourceContent("", memoryUsed, memoryTotal, gb(memoryTotal)+" GB", color)
+		gpuMemory.heading = "GPU MEM"
+		contents = append(contents, gpuMemory)
+	}
+	cpu := nodeUtilizationResourceContent("", nil, cpuTotal, strconv.Itoa(cpuTotal), color)
+	cpu.heading = "CPU"
+	mem := nodeUtilizationResourceContent("", memoryUsed, memoryTotal, gb(memoryTotal)+" GB", color)
+	mem.heading = "MEM"
+	return nodeBarBox("UTILIZED", append(contents, cpu, mem))
+}
+
+// nodeJobUtilizationBars renders per-job utilization placeholders. Slurm job
+// records provide allocations, not per-job GPU, CPU, or memory telemetry.
+func nodeJobUtilizationBars(job Job, color bool) []string {
+	gpu := nodeUtilizationResourceContent("", nil, job.GPUs, strconv.Itoa(job.GPUs), color)
+	gpu.heading = "GPU"
+	gpuMemory := nodeUtilizationResourceContent("", nil, job.MemoryMB, gb(job.MemoryMB)+" GB", color)
+	gpuMemory.heading = "GPU MEM"
+	cpu := nodeUtilizationResourceContent("", nil, job.CPUs, strconv.Itoa(job.CPUs), color)
+	cpu.heading = "CPU"
+	mem := nodeUtilizationResourceContent("", nil, job.MemoryMB, gb(job.MemoryMB)+" GB", color)
+	mem.heading = "MEM"
+	label := fmt.Sprintf("%d • %s • %s", job.ID, printable(job.User), printable(job.Account))
+	return nodeBarBox(label, []nodeBarContent{gpu, gpuMemory, cpu, mem})
 }
 
 func nodeDetailsTitle(n Node) string {
@@ -785,20 +894,36 @@ func nodeDetails(n Node, jobs []Job, width, height, scroll int, color bool) []st
 		wrapped = wrapPaneText(title, width)
 	}
 	// Leave one cell for the scroll indicator so it never overwrites a box border.
-	bars := nodeStatusBars(n, max(1, width-1), color)
-	if !color {
-		for i := range bars {
-			bars[i] = sgrPattern.ReplaceAllString(bars[i], "")
-		}
-	}
-	wrapped = append(wrapped, bars...)
-	if n.Reason != "" {
-		wrapped = append(wrapped, wrapPaneText("Reason: "+printable(n.Reason), width)...)
+	groups := [][]string{
+		nodeStatusBars(n, max(1, width-1), color),
+		nodeUtilizationBars(n, max(1, width-1), color),
 	}
 	for _, job := range jobs {
 		if job.State == "RUNNING" && jobRunsOnNode(job.nodes, n.Name) {
-			wrapped = append(wrapped, wrapPaneText(fmt.Sprintf("Job %d  User: %s  Account: %s  GPU: %d  CPU: %d  MEM: %s GB", job.ID, job.User, job.Account, job.GPUs, job.CPUs, gb(job.MemoryMB)), width)...)
+			groups = append(groups, nodeJobUtilizationBars(job, color))
 		}
+	}
+	boxWidth := 0
+	for _, group := range groups {
+		for _, line := range group {
+			boxWidth = max(boxWidth, visibleWidth(line))
+		}
+	}
+	for i, group := range groups {
+		groups[i] = widenStatBox(group, boxWidth)
+		if !color {
+			for j := range groups[i] {
+				groups[i][j] = sgrPattern.ReplaceAllString(groups[i][j], "")
+			}
+		}
+	}
+	wrapped = append(wrapped, groups[0]...)
+	wrapped = append(wrapped, groups[1]...)
+	if n.Reason != "" {
+		wrapped = append(wrapped, wrapPaneText("Reason: "+printable(n.Reason), width)...)
+	}
+	for _, group := range groups[2:] {
+		wrapped = append(wrapped, group...)
 	}
 	maxScroll := max(0, len(wrapped)-height)
 	scroll = min(max(0, scroll), maxScroll)
@@ -828,6 +953,20 @@ func nodeDetails(n Node, jobs []Job, width, height, scroll int, color bool) []st
 		}
 	}
 	return lines
+}
+
+func scrollMarker(row, rows, scroll, maxScroll int) string {
+	if maxScroll <= 0 || rows <= 0 {
+		return ""
+	}
+	thumbRow := 0
+	if rows > 1 {
+		thumbRow = scroll * (rows - 1) / maxScroll
+	}
+	if row == thumbRow {
+		return "█"
+	}
+	return "░"
 }
 
 func clickedTableRow(y, headerY, height, scroll, count int) (int, bool) {

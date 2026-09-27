@@ -17,7 +17,7 @@ NodeName=c001 State=IDLE CPUTot=32 RealMemory=64000`
 		t.Fatalf("nodes: %+v", nodes)
 	}
 	n := nodes[1]
-	if n.GPUTotal != 8 || n.GPUAllocated != 3 || n.GPUType != "h200" || n.h200Total != 8 || n.gpuAllocationTyped || n.bootTime.IsZero() || n.CPUTotal != 64 || n.CPUAllocated != 16 || n.CPULoad == nil || *n.CPULoad != 2.5 || n.MemoryFreeMB == nil || *n.MemoryFreeMB != 80000 || n.Reason != "reserved for maintenance" {
+	if n.GPUTotal != 8 || n.GPUAllocated != 3 || n.GPUType != "h200" || n.h200Total != 8 || n.gpuAllocationTyped || n.bootTime.IsZero() || n.CPUTotal != 64 || n.CPUAllocated != 16 || n.CPULoad == nil || *n.CPULoad != 2.5 || n.MemoryFreeMB == nil || *n.MemoryFreeMB != 80000 || n.MemoryUsedApproxMB == nil || *n.MemoryUsedApproxMB != 22400 || n.Reason != "reserved for maintenance" {
 		t.Fatalf("node: %+v", n)
 	}
 	if !unavailable(n.State) {
