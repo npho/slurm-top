@@ -94,20 +94,24 @@ The summary defaults to running GPU allocation descending; opening a user
 shows that user's jobs sorted by elapsed time descending. Use **Up/Down** or
 the mouse wheel to select a user, **Right** or **Enter** to open their job
 list, and **Left** or **Escape** to return. Returning restores the prior
-summary sort and selection. The menu shows `JOBS`, `GPU`, and `NODE`; the
-active lower-pane view is highlighted. The selected user's job table also uses
-the `JOBS` menu label. Use **Tab** and **Shift-Tab** to cycle through `JOBS`,
-`GPU`, and `NODE`. The selected user's jobs are opened from `JOBS` with
-**Right** or **Enter**. You can also click the `JOBS`, `GPU`, or `NODE` menu
-item to select it. A horizontal rule separates the menu from the
-current view. In `GPU`, directional arrows select nodes in the displayed grid;
+summary sort and selection. The menu shows `JOBS` and `NODES`; the active
+lower-pane view is highlighted. The selected user's job table also uses the
+`JOBS` menu label. Use **Tab** and **Shift-Tab** to cycle through `JOBS` and
+`NODES`. The selected user's jobs are opened from `JOBS` with **Right** or
+**Enter**. You can also click the `JOBS` or `NODES` menu item to select it. A
+horizontal rule separates the menu from the
+current view. In `NODES`, directional arrows select nodes in the displayed grid;
 clicking a node or pressing **Enter** replaces the grid with that node's
 scrollable details. The details begin with the node, state, and available boot
-time, followed by one `ALLOCATED` box containing GPU, CPU, and memory
-allocation bars. Typed H200 and H200-MIG GPU allocations are shown separately;
-generic GPU allocations remain generically labeled. Press **Escape** to return
-to the grid; the mouse wheel scrolls the details. In `NODE`,
-**Up/Down** or the mouse wheel scrolls long content (`n`/`p` move five rows).
+time, followed by `ALLOCATED` and `UTILIZED` boxes containing GPU, `GPU MEM`,
+CPU, and memory bars. Utilization denominators match the allocations above; their
+numerators are `?` when Slurm does not provide the node-level metric. Memory
+uses approximate OS memory consumption when `FreeMem` is available. Each
+running job on the node follows in a box labeled with its ID, user, and account;
+its GPU, GPU MEM, CPU, and MEM utilization values are placeholders because
+per-job telemetry is not queried. Typed H200 and H200-MIG GPU allocations are
+shown separately; generic GPU allocations remain generically labeled. Press
+**Escape** to return to the grid; the mouse wheel scrolls the details.
 
 Press **Up** from the first row to focus the column header; use **Left/Right**
 to choose a column and **Enter** to sort it descending, then ascending on the
@@ -134,7 +138,10 @@ color in supported node displays.
   allocations.
 - Capacity comes from `scontrol show node -o`.
 - Selected GPU-node details show `BootTime` as the node-reported operating
-  system boot time when Slurm provides it.
+  system boot time when Slurm provides it. Their `UTILIZED` box uses the
+  allocated resources as denominators and `RealMemory - FreeMem` as approximate
+  node memory use when both values are comparable; CPU and GPU utilization are
+  shown as unknown when unavailable.
 - The interactive header uses separate CPU, memory, and GPU boxes. Allocation
   bars use capacity on allocatable nodes only; the non-bold line beneath each
   bar reports unschedulable capacity as a share of all scheduler capacity. GPU

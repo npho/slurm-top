@@ -268,10 +268,10 @@ func TestUsagePairAlignment(t *testing.T) {
 
 func TestTopPaneCycling(t *testing.T) {
 	columns := menuColumns()
-	if len(columns) != 3 || columns[0].field != "cluster" || columns[1].field != "gpu" || columns[2].field != "node" {
+	if len(columns) != 2 || columns[0].field != "cluster" || columns[1].field != "gpu" {
 		t.Fatalf("menu columns = %v", columns)
 	}
-	if columns[0].end >= columns[1].start || columns[1].end >= columns[2].start {
+	if columns[0].end >= columns[1].start {
 		t.Fatalf("overlapping menu columns = %v", columns)
 	}
 	if got := cycleTopPane("cluster", false); got != "gpu" {
@@ -279,9 +279,6 @@ func TestTopPaneCycling(t *testing.T) {
 	}
 	if got := cycleTopPane("gpu", true); got != "cluster" {
 		t.Fatalf("Shift-Tab from gpu = %q", got)
-	}
-	if got := cycleTopPane("node", false); got != "cluster" {
-		t.Fatalf("Tab from node = %q", got)
 	}
 	if got := cycleTopPane("user", false); got != "gpu" {
 		t.Fatalf("Tab from user = %q", got)
@@ -393,7 +390,7 @@ func TestViewMenu(t *testing.T) {
 	if len(menu) != 1 {
 		t.Fatalf("menu lines = %d, want 1", len(menu))
 	}
-	if got := sgrPattern.ReplaceAllString(menu[0], ""); got != " JOBS    GPU    NODE " {
+	if got := sgrPattern.ReplaceAllString(menu[0], ""); got != " JOBS    NODES " {
 		t.Fatalf("menu labels = %q", got)
 	}
 	if !strings.Contains(menu[0], "\x1b[7m JOBS \x1b[27m") {
@@ -401,6 +398,23 @@ func TestViewMenu(t *testing.T) {
 	}
 	if userMenu := viewMenu(paneMenuLabel("user")); !strings.Contains(userMenu[0], "\x1b[7m JOBS \x1b[27m") {
 		t.Fatalf("user jobs view is not highlighted as jobs: %q", userMenu)
+	}
+}
+
+func TestUsageValuePercentRoundsToWholeNumber(t *testing.T) {
+	for _, test := range []struct {
+		used, total int
+		want        string
+	}{
+		{1, 3, "33%"},
+		{2, 3, "67%"},
+		{1, 8, "12%"},
+		{7, 8, "88%"},
+		{0, 0, "0%"},
+	} {
+		if got := usageValueFor(test.used, test.total, "", "", false).percent; got != test.want {
+			t.Errorf("usageValueFor(%d, %d) = %q, want %q", test.used, test.total, got, test.want)
+		}
 	}
 }
 

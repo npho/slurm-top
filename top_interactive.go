@@ -476,12 +476,12 @@ func statBox(label string, content ...string) []string {
 }
 
 func paneMenuLabel(pane string) string {
-	return map[string]string{"cluster": "JOBS", "user": "JOBS", "gpu": "GPU", "node": "NODE"}[pane]
+	return map[string]string{"cluster": "JOBS", "user": "JOBS", "gpu": "NODES"}[pane]
 }
 
 // viewMenu presents every lower-pane view and highlights the active label.
 func viewMenu(active string) []string {
-	labels := []string{"JOBS", "GPU", "NODE"}
+	labels := []string{"JOBS", "NODES"}
 	for i, label := range labels {
 		padded := " " + label + " "
 		if label == active {
@@ -496,7 +496,7 @@ func viewMenu(active string) []string {
 func menuColumns() []headerColumn {
 	labels := []struct {
 		field, label string
-	}{{"cluster", "JOBS"}, {"gpu", "GPU"}, {"node", "NODE"}}
+	}{{"cluster", "JOBS"}, {"gpu", "NODES"}}
 	columns := make([]headerColumn, len(labels))
 	start := 1
 	for i, item := range labels {
@@ -516,7 +516,7 @@ func cycleTopPane(pane string, reverse bool) string {
 		}
 		return "gpu"
 	}
-	panes := []string{"cluster", "gpu", "node"}
+	panes := []string{"cluster", "gpu"}
 	for i, candidate := range panes {
 		if pane != candidate {
 			continue
@@ -1146,13 +1146,18 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 			if pane == "user" {
 				offset = hScroll
 			}
-			fmt.Fprint(&b, cropANSI(header, offset, width-1), "\r\n")
+			marker := ""
+			if len(items) > rows {
+				marker = " " // keep the header aligned with the scrollbar column below
+			}
+			fmt.Fprint(&b, cropANSI(header, offset, tableContentWidth), marker, "\r\n")
+			maxScroll := max(0, len(items)-rows)
 			for i := scroll; i < len(items) && i < scroll+rows; i++ {
-				line := cropANSI(items[i], offset, width-1)
+				line := cropANSI(items[i], offset, tableContentWidth)
 				if !headerFocused && i == selected {
 					line = "\x1b[7m" + line + "\x1b[0m"
 				}
-				fmt.Fprint(&b, line, "\r\n")
+				fmt.Fprint(&b, line, scrollMarker(i-scroll, rows, scroll, maxScroll), "\r\n")
 			}
 		} else {
 			visibleRows := max(1, height-headerY)
@@ -1161,24 +1166,18 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 			}
 			{
 				var body bytes.Buffer
-				if pane == "gpu" {
-					if err := renderGridSelected(&body, s.nodes, time.Now(), width-1, 0, 0, colorBars, nodeSelected); err != nil {
-						return err
-					}
-				} else if err := renderDashboard(&body, s.nodes, time.Now(), width-1, colorBars); err != nil {
+				if err := renderGridSelected(&body, s.nodes, time.Now(), width-1, 0, 0, colorBars, nodeSelected); err != nil {
 					return err
 				}
 				bodyLines := bytes.Split(bytes.TrimSuffix(body.Bytes(), []byte("\n")), []byte("\n"))
-				if pane == "gpu" {
-					for i, line := range bodyLines {
-						if bytes.Contains(line, []byte("\x1b[7m")) {
-							if i < nodeScroll {
-								nodeScroll = i
-							} else if i >= nodeScroll+visibleRows {
-								nodeScroll = i - visibleRows + 1
-							}
-							break
+				for i, line := range bodyLines {
+					if bytes.Contains(line, []byte("\x1b[7m")) {
+						if i < nodeScroll {
+							nodeScroll = i
+						} else if i >= nodeScroll+visibleRows {
+							nodeScroll = i - visibleRows + 1
 						}
+						break
 					}
 				}
 				nodeScroll = min(nodeScroll, max(0, len(bodyLines)-visibleRows))
@@ -1235,7 +1234,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 			case "n", " ":
 				if pane == "gpu" && nodeDetailsOpen {
 					detailScroll += 5
-				} else if pane == "gpu" || pane == "node" {
+				} else if pane == "gpu" {
 					nodeScroll += 5
 				} else {
 					continue
@@ -1243,7 +1242,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 			case "p":
 				if pane == "gpu" && nodeDetailsOpen {
 					detailScroll = max(0, detailScroll-5)
-				} else if pane == "gpu" || pane == "node" {
+				} else if pane == "gpu" {
 					nodeScroll = max(0, nodeScroll-5)
 				} else {
 					continue
@@ -1254,8 +1253,6 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 						detailScroll++
 					} else if pane == "gpu" {
 						nodeSelected = min(nodeSelected+gridColumns(width-1), max(0, len(s.nodes)-1))
-					} else {
-						nodeScroll++
 					}
 					break
 				}
@@ -1276,8 +1273,6 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 						detailScroll = max(0, detailScroll-1)
 					} else if pane == "gpu" {
 						nodeSelected = max(0, nodeSelected-gridColumns(width-1))
-					} else {
-						nodeScroll = max(0, nodeScroll-1)
 					}
 					break
 				}
@@ -1445,8 +1440,6 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					selected += ev.wheel
 				} else if ev.wheel != 0 && pane == "gpu" && nodeDetailsOpen {
 					detailScroll = max(0, detailScroll+ev.wheel)
-				} else if ev.wheel != 0 && pane == "node" {
-					nodeScroll = max(0, nodeScroll+ev.wheel)
 				} else {
 					continue
 				}

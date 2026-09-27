@@ -53,18 +53,22 @@ Show command help.
 The summary initially sorts running GPUs descending. Use Up and Down, or the
 mouse wheel, to select a user. Right or Enter opens that user's job table.
 Left or Escape returns to the summary and preserves its prior sort and selected user.
-The menu shows JOBS, GPU, and NODE; the active lower-pane view is highlighted.
-The selected user's job table also uses the JOBS menu label. Tab and Shift-Tab
-cycle through JOBS, GPU, and NODE. The selected user's jobs open from JOBS with
-Right or Enter. JOBS, GPU, and NODE can also be selected by clicking their menu
-items. A horizontal rule separates the menu from the
-current view. In GPU, directional arrows select a node in the displayed grid;
+The menu shows JOBS and NODES; the active lower-pane view is highlighted. The
+selected user's job table also uses the JOBS menu label. Tab and Shift-Tab cycle
+through JOBS and NODES. The selected user's jobs open from JOBS with Right or
+Enter. JOBS and NODES can also be selected by clicking their menu items. A
+horizontal rule separates the menu from the
+current view. In NODES, directional arrows select a node in the displayed grid;
 clicking a node or Enter replaces the grid with that node's scrollable details.
-The details show node state and boot time followed by one ALLOCATED box with
-GPU, CPU, and memory allocation bars. H200 and H200-MIG allocations remain
-separate; generic GPUs remain generically labeled. Escape returns to the grid,
-and the mouse wheel scrolls the details. In NODE, Up and Down or the mouse
-wheel scroll long content; n and p move five rows.
+The details show node state and boot time followed by ALLOCATED and UTILIZED
+boxes with GPU, GPU MEM, CPU, and memory bars. Utilization denominators match
+the allocations above. Unknown utilization numerators show as ?; memory utilization
+uses approximate OS memory consumption when FreeMem is available. Each running
+job on the node follows in a box labeled with its ID, user, and account; its
+GPU, GPU MEM, CPU, and MEM utilization values are placeholders because per-job
+telemetry is not queried. H200 and H200-MIG allocations remain separate;
+generic GPUs remain generically labeled. Escape returns to the grid, and the
+mouse wheel scrolls the details.
 .PP
 Press Up from the first row to focus column headers. In header focus, use Left
 and Right to choose a column and Enter to sort it descending; a subsequent
@@ -94,8 +98,10 @@ and is shown separately. Capacity is derived from
 .BR scontrol .
 CPU-per-GPU and memory-per-CPU values are ratios of scheduler allocations.
 Selected GPU-node details show the node-reported operating-system boot time when
-Slurm provides BootTime. Memory table values are decimal GB; aggregate memory
-summaries are decimal TB.
+Slurm provides BootTime. Their utilization denominators are Slurm allocations,
+and memory utilization is RealMemory minus FreeMem when both values are
+comparable; CPU and GPU utilization are otherwise unknown. Memory table values
+are decimal GB; aggregate memory summaries are decimal TB.
 .PP
 Job details include QoS, partition, progress, and elapsed/requested time.
 Elapsed time is formatted as
