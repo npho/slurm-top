@@ -297,6 +297,28 @@ func TestNodeDetails(t *testing.T) {
 	if strings.Contains(contents, "Free memory:") {
 		t.Fatalf("free-memory row remains: %q", lines)
 	}
+	utilized := nodeUtilizationBars(node, 80, false)
+	if len(utilized) != 5 || strings.TrimSpace(utilized[3]) == "" {
+		t.Fatalf("utilization box contains a blank row: %q", utilized)
+	}
+	groups := [][]string{nodeStatusBars(node, 80, false), utilized, nodeJobUtilizationBars(jobs[0], false)}
+	widest := 0
+	for _, group := range groups {
+		for _, line := range group {
+			widest = max(widest, visibleWidth(line))
+		}
+	}
+	for _, group := range groups {
+		for _, line := range widenStatBox(group, widest) {
+			if visibleWidth(line) != widest {
+				t.Fatalf("box width = %d, want %d: %q", visibleWidth(line), widest, line)
+			}
+		}
+	}
+	idleUtilized := strings.Join(nodeUtilizationBars(Node{GPUTotal: 4, CPUTotal: 64, MemoryTotalMB: 32768}, 80, false), "\n")
+	if strings.Contains(idleUtilized, "?") || strings.Count(idleUtilized, "0%  0/0") != 4 || !strings.Contains(idleUtilized, "░") {
+		t.Fatalf("zero allocations should have empty 0%% bars: %q", idleUtilized)
+	}
 	for _, removed := range []string{"╭─ GPU", "╭─ CPU", "╭─ MEM"} {
 		if strings.Contains(contents, removed) {
 			t.Fatalf("individual resource box remains: %q", lines)

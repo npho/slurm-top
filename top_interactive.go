@@ -668,8 +668,12 @@ func nodeResourceContent(label string, used, usable, total int, usedText, usable
 		usageValueFor(used, usable, usedText, usableText, true),
 		usageValueFor(total-usable, total, unavailableText, totalText, false))
 	barWidth := max(visibleWidth(info), visibleWidth(unavailable))
+	barTotal := usable
+	if used == 0 && usable == 0 {
+		barTotal = 1 // A zero allocation is known empty, not an unknown bar.
+	}
 	return nodeBarContent{
-		status:      label + coloredBar(used, usable, barWidth, color),
+		status:      label + coloredBar(used, barTotal, barWidth, color),
 		info:        strings.Repeat(" ", visibleWidth(label)) + info,
 		unavailable: strings.Repeat(" ", visibleWidth(label)) + unavailable,
 	}
