@@ -192,6 +192,21 @@ func TestMouseAndArrows(t *testing.T) {
 		}
 	}
 }
+func TestScrollMarker(t *testing.T) {
+	if got := scrollMarker(0, 3, 0, 0); got != "" {
+		t.Fatalf("marker without overflow = %q", got)
+	}
+	if got := scrollMarker(0, 3, 0, 4); got != "█" {
+		t.Fatalf("top marker = %q", got)
+	}
+	if got := scrollMarker(2, 3, 4, 4); got != "█" {
+		t.Fatalf("bottom marker = %q", got)
+	}
+	if got := scrollMarker(1, 3, 0, 4); got != "░" {
+		t.Fatalf("track marker = %q", got)
+	}
+}
+
 func TestClickedTableRow(t *testing.T) {
 	if row, ok := clickedTableRow(7, 5, 24, 3, 10); !ok || row != 4 {
 		t.Fatalf("clicked row = %d, %t; want 4, true", row, ok)

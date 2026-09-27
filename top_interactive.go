@@ -1062,6 +1062,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 			rows = 1
 		}
 		isTable := pane == "cluster" || pane == "user"
+		tableContentWidth := width - 1
 		var headers, items []string
 		if isTable {
 			tableUser := ""
@@ -1076,10 +1077,13 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 			for _, item := range items {
 				tableWidth = max(tableWidth, utf8.RuneCountInString(sgrPattern.ReplaceAllString(item, "")))
 			}
+			if len(items) > rows {
+				tableContentWidth = max(1, width-2) // reserve the rightmost cell for the scrollbar
+			}
 			if pane == "cluster" {
 				hScroll = 0
 			} else {
-				hScroll = min(hScroll, max(0, tableWidth-(width-1)))
+				hScroll = min(hScroll, max(0, tableWidth-tableContentWidth))
 			}
 			if selectedHeader >= len(columns) {
 				selectedHeader = len(columns) - 1
@@ -1111,6 +1115,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				if selected >= scroll+rows {
 					scroll = selected - rows + 1
 				}
+				scroll = min(scroll, max(0, len(items)-rows))
 			}
 		}
 		var b bytes.Buffer
@@ -1196,11 +1201,9 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 		if pane == "user" {
 			footer = "Jobs: " + user + "  Tab/Shift-Tab views  ←/→ scroll table (← users at left edge)  Esc users  q quit"
 		} else if pane == "gpu" && nodeDetailsOpen {
-			footer = "Node details  ↑/↓ scroll  Esc GPU grid  q quit"
+			footer = "Node details  ↑/↓ scroll  Esc node grid  q quit"
 		} else if pane == "gpu" {
 			footer = "Tab/Shift-Tab views  ↑/↓ select node  Enter details  r refresh  q quit"
-		} else if pane == "node" {
-			footer = "Tab/Shift-Tab views  ↑/↓ scroll  r refresh  q quit"
 		}
 		if message != "" {
 			footer += "  " + message
