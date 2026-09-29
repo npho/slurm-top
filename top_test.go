@@ -192,6 +192,54 @@ func TestMouseAndArrows(t *testing.T) {
 		}
 	}
 }
+func TestWheelBurstIsOneStep(t *testing.T) {
+	in, out, e := os.Pipe()
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer in.Close()
+	events := make(chan uiEvent, 10)
+	go readTopEvents(in, events)
+	// One notch as several terminals report it: four reports at once.
+	_, e = out.Write([]byte(strings.Repeat("\x1b[<65;40;5M", 4) + "q"))
+	out.Close()
+	if e != nil {
+		t.Fatal(e)
+	}
+	if ev := <-events; ev.wheel != 1 {
+		t.Fatalf("first event = %+v, want wheel down", ev)
+	}
+	if ev := <-events; ev.key != "q" {
+		t.Fatalf("second event = %+v, want q (burst not coalesced)", ev)
+	}
+}
+
+func TestWheelThrottle(t *testing.T) {
+	type wheelStep struct {
+		dir int
+		at  time.Duration
+	}
+	start := time.Unix(1000, 0)
+	tests := []struct {
+		name  string
+		steps []wheelStep
+		want  []bool
+	}{
+		{"burst within window", []wheelStep{{1, 0}, {1, time.Millisecond}, {1, 2 * time.Millisecond}}, []bool{true, false, false}},
+		{"separate notches", []wheelStep{{1, 0}, {1, wheelBurst}, {1, 3 * wheelBurst}}, []bool{true, true, true}},
+		{"direction change", []wheelStep{{1, 0}, {-1, time.Millisecond}, {1, 2 * time.Millisecond}}, []bool{true, true, true}},
+		{"continuous stream throttled", []wheelStep{{-1, 0}, {-1, 10 * time.Millisecond}, {-1, 20 * time.Millisecond}, {-1, 30 * time.Millisecond}}, []bool{true, false, false, true}},
+	}
+	for _, tc := range tests {
+		var w wheelThrottle
+		for i, step := range tc.steps {
+			if got := w.accept(step.dir, start.Add(step.at)); got != tc.want[i] {
+				t.Errorf("%s: step %d accept = %t, want %t", tc.name, i, got, tc.want[i])
+			}
+		}
+	}
+}
+
 func TestScrollMarker(t *testing.T) {
 	if got := scrollMarker(0, 3, 0, 0); got != "" {
 		t.Fatalf("marker without overflow = %q", got)

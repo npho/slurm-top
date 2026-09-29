@@ -23,6 +23,28 @@ type uiEvent struct {
 	wheel int
 }
 
+// wheelBurst is how close together same-direction wheel reports must be to be
+// treated as one physical wheel notch. Many terminals emit several reports
+// (often 3-5) per notch in the same instant; stepping once per burst keeps
+// wheel scrolling to one line per notch. Continuous scrolling still advances
+// once per interval.
+const wheelBurst = 30 * time.Millisecond
+
+type wheelThrottle struct {
+	dir  int
+	last time.Time
+}
+
+// accept reports whether a wheel report in direction dir at time now should
+// produce a scroll step.
+func (w *wheelThrottle) accept(dir int, now time.Time) bool {
+	if dir == w.dir && !w.last.IsZero() && now.Sub(w.last) < wheelBurst {
+		return false
+	}
+	w.dir, w.last = dir, now
+	return true
+}
+
 // SGR mouse reports are 1-based: ESC [ < button ; x ; y M (press) / m (release).
 func readTopEvents(in *os.File, events chan<- uiEvent) {
 	bytes := make(chan byte)
@@ -41,6 +63,7 @@ func readTopEvents(in *os.File, events chan<- uiEvent) {
 	var seq strings.Builder
 	var escapeTimeout <-chan time.Time
 	var escapeTimer *time.Timer
+	var wheel wheelThrottle
 	send := func(e uiEvent) {
 		select {
 		case events <- e:
@@ -109,10 +132,11 @@ func readTopEvents(in *os.File, events chan<- uiEvent) {
 					if e1 != nil || e2 != nil || e3 != nil {
 						continue
 					}
-					if button == 64 {
-						send(uiEvent{wheel: -1})
-					} else if button == 65 {
-						send(uiEvent{wheel: 1})
+					if button == 64 || button == 65 {
+						dir := 2*(button-64) - 1
+						if wheel.accept(dir, time.Now()) {
+							send(uiEvent{wheel: dir})
+						}
 					} else if button == 0 {
 						send(uiEvent{key: "click", x: x, y: y})
 					}
