@@ -53,12 +53,16 @@ Show command help.
 The summary initially sorts running GPUs descending. Use Up and Down, or the
 mouse wheel, to select a user. Right or Enter opens that user's job table.
 Left or Escape returns to the summary and preserves its prior sort and selected user.
-The menu shows JOBS and NODES; the active lower-pane view is highlighted. The
-selected user's job table also uses the JOBS menu label. Tab and Shift-Tab cycle
-through JOBS and NODES. The selected user's jobs open from JOBS with Right or
-Enter. JOBS and NODES can also be selected by clicking their menu items. A
+The menu shows USER, ACCOUNT, QOS, and NODES; the active lower-pane view is highlighted. The
+selected user's job table uses the USER menu label, and an account's job table uses the ACCOUNT menu label. Tab and Shift-Tab cycle
+through USER, ACCOUNT, QOS, and NODES. The selected user's or account's jobs open with Right or
+Enter. USER, ACCOUNT, QOS, and NODES can also be selected by clicking their menu items. A
 horizontal rule separates the menu from the
-current view. In NODES, directional arrows select a node in the displayed grid;
+current view. In QOS, a table displays Quality of Service allocations and pending
+demand across sortable columns. Selecting a QoS row and pressing Right or Enter
+opens that QoS's scrollable details view displaying job states, running allocations,
+pending requests, limits, and runtime metrics; Escape or Left returns to the QOS table.
+In NODES, directional arrows select a node in the displayed grid;
 clicking a node or Enter replaces the grid with that node's scrollable details.
 The details show node state and boot time followed by ALLOCATED and UTILIZED
 boxes with GPU, GPU MEM, CPU, and memory bars. Utilization denominators match
@@ -78,9 +82,10 @@ sorts it. Clicking a summary row opens that user's jobs. The keys
 .BR c ,
 .BR m ,
 .BR j ,
+.BR u ,
 and
-.B u
-select GPU, CPU, memory, running-job, and username summary sorts.
+.B a
+select GPU, CPU, memory, running-job, user, and account summary sorts.
 .B r
 refreshes and
 .B q
@@ -101,7 +106,7 @@ Selected GPU-node details show the node-reported operating-system boot time when
 Slurm provides BootTime. Their utilization denominators are Slurm allocations,
 and memory utilization is RealMemory minus FreeMem when both values are
 comparable; CPU and GPU utilization are otherwise unknown. Memory table values
-are decimal GB; aggregate memory summaries are decimal TB.
+are decimal GB (displayed as G); aggregate memory summaries are decimal TB (displayed as T).
 .PP
 Job details include QoS, partition, progress, and elapsed/requested time.
 Elapsed time is formatted as

@@ -316,23 +316,53 @@ func TestUsagePairAlignment(t *testing.T) {
 
 func TestTopPaneCycling(t *testing.T) {
 	columns := menuColumns()
-	if len(columns) != 2 || columns[0].field != "cluster" || columns[1].field != "gpu" {
+	if len(columns) != 4 || columns[0].field != "cluster" || columns[1].field != "account" || columns[2].field != "qos" || columns[3].field != "gpu" {
 		t.Fatalf("menu columns = %v", columns)
 	}
-	if columns[0].end >= columns[1].start {
+	if columns[0].end >= columns[1].start || columns[1].end >= columns[2].start || columns[2].end >= columns[3].start {
 		t.Fatalf("overlapping menu columns = %v", columns)
 	}
-	if got := cycleTopPane("cluster", false); got != "gpu" {
+	if got := cycleTopPane("cluster", false); got != "account" {
 		t.Fatalf("Tab from cluster = %q", got)
 	}
-	if got := cycleTopPane("gpu", true); got != "cluster" {
+	if got := cycleTopPane("account", false); got != "qos" {
+		t.Fatalf("Tab from account = %q", got)
+	}
+	if got := cycleTopPane("qos", false); got != "gpu" {
+		t.Fatalf("Tab from qos = %q", got)
+	}
+	if got := cycleTopPane("gpu", false); got != "cluster" {
+		t.Fatalf("Tab from gpu = %q", got)
+	}
+	if got := cycleTopPane("cluster", true); got != "gpu" {
+		t.Fatalf("Shift-Tab from cluster = %q", got)
+	}
+	if got := cycleTopPane("gpu", true); got != "qos" {
 		t.Fatalf("Shift-Tab from gpu = %q", got)
 	}
-	if got := cycleTopPane("user", false); got != "gpu" {
+	if got := cycleTopPane("qos", true); got != "account" {
+		t.Fatalf("Shift-Tab from qos = %q", got)
+	}
+	if got := cycleTopPane("account", true); got != "cluster" {
+		t.Fatalf("Shift-Tab from account = %q", got)
+	}
+	if got := cycleTopPane("user", false); got != "account" {
 		t.Fatalf("Tab from user = %q", got)
 	}
 	if got := cycleTopPane("user", true); got != "cluster" {
 		t.Fatalf("Shift-Tab from user = %q", got)
+	}
+	if got := cycleTopPane("account-jobs", false); got != "qos" {
+		t.Fatalf("Tab from account-jobs = %q", got)
+	}
+	if got := cycleTopPane("account-jobs", true); got != "account" {
+		t.Fatalf("Shift-Tab from account-jobs = %q", got)
+	}
+	if got := cycleTopPane("qos-details", false); got != "gpu" {
+		t.Fatalf("Tab from qos-details = %q", got)
+	}
+	if got := cycleTopPane("qos-details", true); got != "qos" {
+		t.Fatalf("Shift-Tab from qos-details = %q", got)
 	}
 }
 
@@ -349,7 +379,7 @@ func TestNodeDetails(t *testing.T) {
 	node := Node{Name: "g001", State: "MIXED", GPUType: "h200-mig", GPUTotal: 12, GPUAllocated: 10, migTotal: 12, migAllocated: 10, gpuAllocationTyped: true, CPUTotal: 64, CPUAllocated: 32, MemoryTotalMB: 32768, MemoryAllocatedMB: 16384, MemoryFreeMB: &free, MemoryUsedApproxMB: &used, bootTime: time.Date(2025, time.January, 2, 3, 4, 5, 0, time.UTC), Reason: "maintenance"}
 	lines := nodeDetails(node, jobs, 80, 20, 0, false)
 	contents := strings.Join(lines, "\n")
-	for _, want := range []string{"Node: g001    State: MIXED    Booted: 03:04:05 on January 02, 2025", "╭─ ALLOCATED", "╭─ UTILIZED", "GPU", "GPU MEM", "H200-MIG", "CPU", "MEM", "32/64", "10/12", "17/34 GB", "?/10", "?/32", "33/17 GB", "maintenance", "╭─ 42 • alice • research", "GPU MEM", "?/2", "?/8", "?/17 GB"} {
+	for _, want := range []string{"Node: g001    State: MIXED    Booted: 03:04:05 on January 02, 2025", "╭─ ALLOCATED", "╭─ UTILIZED", "GPU", "GPU MEM", "H200-MIG", "CPU", "MEM", "32/64", "10/12", "17/34G", "?/10", "?/32", "33/17G", "maintenance", "╭─ 42 • alice • research", "GPU MEM", "?/2", "?/8", "?/17G"} {
 		if !strings.Contains(contents, want) {
 			t.Errorf("details missing %q: %q", want, lines)
 		}
@@ -428,24 +458,142 @@ func TestNodeGPUStatusBars(t *testing.T) {
 	}
 	memoryInfo := sgrPattern.ReplaceAllString(down[3], "")
 	memoryUnavailable := sgrPattern.ReplaceAllString(down[4], "")
-	if strings.Index(memoryInfo, "GB") != strings.Index(memoryUnavailable, "GB") || strings.LastIndex(memoryInfo[:strings.Index(memoryInfo, "GB")], "%") != strings.LastIndex(memoryUnavailable[:strings.Index(memoryUnavailable, "GB")], "%") {
+	if strings.Index(memoryInfo, "G") != strings.Index(memoryUnavailable, "G") || strings.LastIndex(memoryInfo[:strings.Index(memoryInfo, "G")], "%") != strings.LastIndex(memoryUnavailable[:strings.Index(memoryUnavailable, "G")], "%") {
 		t.Fatalf("memory allocation rows are not aligned: %q / %q", memoryInfo, memoryUnavailable)
 	}
 }
 
 func TestViewMenu(t *testing.T) {
-	menu := viewMenu("JOBS")
+	menu := viewMenu("USER")
 	if len(menu) != 1 {
 		t.Fatalf("menu lines = %d, want 1", len(menu))
 	}
-	if got := sgrPattern.ReplaceAllString(menu[0], ""); got != " JOBS    NODES " {
+	if got := sgrPattern.ReplaceAllString(menu[0], ""); got != " USER    ACCOUNT    QOS    NODES " {
 		t.Fatalf("menu labels = %q", got)
 	}
-	if !strings.Contains(menu[0], "\x1b[7m JOBS \x1b[27m") {
-		t.Fatalf("cluster is not highlighted: %q", menu)
+	if !strings.Contains(menu[0], "\x1b[7m USER \x1b[27m") {
+		t.Fatalf("cluster/user is not highlighted: %q", menu)
 	}
-	if userMenu := viewMenu(paneMenuLabel("user")); !strings.Contains(userMenu[0], "\x1b[7m JOBS \x1b[27m") {
-		t.Fatalf("user jobs view is not highlighted as jobs: %q", userMenu)
+	if acctMenu := viewMenu(paneMenuLabel("account")); !strings.Contains(acctMenu[0], "\x1b[7m ACCOUNT \x1b[27m") {
+		t.Fatalf("account view is not highlighted as ACCOUNT: %q", acctMenu)
+	}
+	if acctJobsMenu := viewMenu(paneMenuLabel("account-jobs")); !strings.Contains(acctJobsMenu[0], "\x1b[7m ACCOUNT \x1b[27m") {
+		t.Fatalf("account jobs view is not highlighted as ACCOUNT: %q", acctJobsMenu)
+	}
+	if qosMenu := viewMenu(paneMenuLabel("qos")); !strings.Contains(qosMenu[0], "\x1b[7m QOS \x1b[27m") {
+		t.Fatalf("qos view is not highlighted as QOS: %q", qosMenu)
+	}
+	if qosDetailsMenu := viewMenu(paneMenuLabel("qos-details")); !strings.Contains(qosDetailsMenu[0], "\x1b[7m QOS \x1b[27m") {
+		t.Fatalf("qos details view is not highlighted as QOS: %q", qosDetailsMenu)
+	}
+	if userMenu := viewMenu(paneMenuLabel("user")); !strings.Contains(userMenu[0], "\x1b[7m USER \x1b[27m") {
+		t.Fatalf("user jobs view is not highlighted as USER: %q", userMenu)
+	}
+}
+
+func TestAccountAggregationAndRows(t *testing.T) {
+	snap := Snapshot{
+		Jobs: []Job{
+			{
+				ID:             1,
+				User:           "alice",
+				Account:        "ai-lab",
+				State:          "RUNNING",
+				CPUs:           8,
+				GPUs:           2,
+				MemoryMB:       16384,
+				Elapsed:        "50% [0-01:00|0-02:00]",
+				ElapsedMinutes: 60,
+			},
+			{
+				ID:             2,
+				User:           "bob",
+				Account:        "ai-lab",
+				State:          "RUNNING",
+				CPUs:           4,
+				GPUs:           1,
+				MemoryMB:       8192,
+				Elapsed:        "25% [0-00:30|0-02:00]",
+				ElapsedMinutes: 30,
+			},
+			{
+				ID:       3,
+				User:     "charlie",
+				Account:  "ai-lab",
+				State:    "PENDING",
+				CPUs:     16,
+				GPUs:     4,
+				MemoryMB: 32768,
+			},
+			{
+				ID:             4,
+				User:           "dave",
+				Account:        "stats-lab",
+				State:          "RUNNING",
+				CPUs:           2,
+				GPUs:           0,
+				MemoryMB:       4096,
+				Elapsed:        "10% [0-00:10|0-01:40]",
+				ElapsedMinutes: 10,
+			},
+		},
+	}
+
+	accounts := collectAccounts(snap)
+	if len(accounts) != 2 {
+		t.Fatalf("expected 2 accounts, got %d", len(accounts))
+	}
+	sortAccounts(accounts, "account")
+	if accounts[0].Account != "ai-lab" || accounts[1].Account != "stats-lab" {
+		t.Fatalf("unexpected account sort order: %+v", accounts)
+	}
+	ai := accounts[0]
+	if ai.RunningJobs != 2 || ai.PendingJobs != 1 {
+		t.Errorf("ai-lab jobs: running=%d, pending=%d", ai.RunningJobs, ai.PendingJobs)
+	}
+	if ai.CPUs != 12 || ai.GPUs != 3 || ai.MemoryMB != 24576 {
+		t.Errorf("ai-lab running alloc: %d CPUs, %d GPUs, %d MB", ai.CPUs, ai.GPUs, ai.MemoryMB)
+	}
+	if ai.PendingCPUs != 16 || ai.PendingGPUs != 4 || ai.PendingMemoryMB != 32768 {
+		t.Errorf("ai-lab pending demand: %d CPUs, %d GPUs, %d MB", ai.PendingCPUs, ai.PendingGPUs, ai.PendingMemoryMB)
+	}
+
+	// Test accountRows overview (account == "")
+	headers, lines, ids, columns := accountRows(snap, "", "account", false)
+	if len(headers) != 1 || len(lines) != 2 || len(ids) != 2 {
+		t.Fatalf("accountRows output count mismatch: headers=%d, lines=%d, ids=%d", len(headers), len(lines), len(ids))
+	}
+	cleanHeader := sgrPattern.ReplaceAllString(headers[0], "")
+	if !strings.HasPrefix(cleanHeader, "ACCOUNT") {
+		t.Fatalf("first column is not ACCOUNT: %q", cleanHeader)
+	}
+	if columns[0].field != "account" {
+		t.Fatalf("columns[0].field = %q, want 'account'", columns[0].field)
+	}
+	if !strings.Contains(lines[0], "ai-lab") || !strings.Contains(lines[1], "stats-lab") {
+		t.Fatalf("lines missing accounts: %v", lines)
+	}
+
+	// Test accountRows drill-down into account jobs (account == "ai-lab")
+	jobHeaders, jobLines, jobIDs, jobCols := accountRows(snap, "ai-lab", "id", false)
+	if len(jobHeaders) != 1 || len(jobLines) != 3 || len(jobIDs) != 3 {
+		t.Fatalf("account job lines mismatch: lines=%d", len(jobLines))
+	}
+	cleanJobHdr := sgrPattern.ReplaceAllString(jobHeaders[0], "")
+	if !strings.Contains(cleanJobHdr, "USER") {
+		t.Fatalf("account job header missing USER column: %q", cleanJobHdr)
+	}
+	if jobCols[1].field != "user" {
+		t.Fatalf("jobCols[1].field = %q, want 'user'", jobCols[1].field)
+	}
+	if !strings.Contains(jobLines[0], "charlie") || !strings.Contains(jobLines[1], "bob") || !strings.Contains(jobLines[2], "alice") {
+		t.Fatalf("job lines missing users: %v", jobLines)
+	}
+
+	// Test accountJobStats
+	uCount, runCount, pendCount := accountJobStats(snap, "ai-lab")
+	if uCount != 3 || runCount != 2 || pendCount != 1 {
+		t.Errorf("accountJobStats: users=%d, running=%d, pending=%d; want 3, 2, 1", uCount, runCount, pendCount)
 	}
 }
 
@@ -494,5 +642,87 @@ func TestMemoryUnits(t *testing.T) {
 		if got := memoryMB(s); got != want {
 			t.Errorf("%q: got %d want %d", s, got, want)
 		}
+	}
+}
+
+func TestMemoryUnitDisplayAndCondensing(t *testing.T) {
+	snap := Snapshot{
+		CapacityCPU:         32,
+		CapacityGPU:         8,
+		CapacityMemoryMB:    65536,
+		AllocatableCPU:      32,
+		AllocatableGPU:      8,
+		AllocatableMemoryMB: 65536,
+		Users: []Usage{
+			{
+				User:            "alice",
+				RunningJobs:     1,
+				CPUs:            8,
+				GPUs:            2,
+				MemoryMB:        16384,
+				PendingJobs:     1,
+				PendingCPUs:     4,
+				PendingGPUs:     1,
+				PendingMemoryMB: 8192,
+			},
+		},
+		Jobs: []Job{
+			{
+				ID:       101,
+				User:     "alice",
+				Account:  "ai-lab",
+				State:    "RUNNING",
+				CPUs:     8,
+				GPUs:     2,
+				MemoryMB: 16384,
+			},
+		},
+	}
+
+	// 1. topLines
+	lines := topLines(snap, "user", 0)
+	topOutput := strings.Join(lines, "\n")
+	if strings.Contains(topOutput, " TB") {
+		t.Errorf("topLines contains ' TB': %s", topOutput)
+	}
+	if !strings.Contains(topOutput, "MEM allocated") || !strings.Contains(lines[3], "T") {
+		t.Errorf("topLines MEM allocated missing 'T': %q", lines[3])
+	}
+	if !strings.Contains(topOutput, "17G") || !strings.Contains(topOutput, "9G") {
+		t.Errorf("topLines user row missing '17G' or '9G': %s", topOutput)
+	}
+
+	// 2. topRows overview (cluster)
+	_, userLines, _, _ := topRows(snap, "", "user", false)
+	if len(userLines) != 1 || !strings.Contains(userLines[0], "17G") || !strings.Contains(userLines[0], "9G") {
+		t.Errorf("topRows user overview missing G unit: %v", userLines)
+	}
+
+	// 3. topRows user jobs
+	_, jobLines, _, _ := topRows(snap, "alice", "id", false)
+	if len(jobLines) != 1 || !strings.Contains(jobLines[0], "17G") {
+		t.Errorf("topRows user jobs missing G unit: %v", jobLines)
+	}
+
+	// 4. accountRows overview
+	_, acctLines, _, _ := accountRows(snap, "", "account", false)
+	if len(acctLines) != 1 || !strings.Contains(acctLines[0], "17G") {
+		t.Errorf("accountRows overview missing G unit: %v", acctLines)
+	}
+
+	// 5. accountRows account jobs
+	_, acctJobLines, _, _ := accountRows(snap, "ai-lab", "id", false)
+	if len(acctJobLines) != 1 || !strings.Contains(acctJobLines[0], "17G") {
+		t.Errorf("accountRows account jobs missing G unit: %v", acctJobLines)
+	}
+
+	// 6. horizontalBars
+	bars := horizontalBars(snap, 120, false)
+	barsText := strings.Join(bars, "\n")
+	if strings.Contains(barsText, " TB") {
+		t.Errorf("horizontalBars contains ' TB': %s", barsText)
+	}
+	if !strings.Contains(barsText, "T") {
+		t.Errorf("horizontalBars missing 'T': %s", barsText)
 	}
 }

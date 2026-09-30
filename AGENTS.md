@@ -10,7 +10,8 @@ there is no server, database, or generated-code step.
 Start by reading `README.md`, `go.mod`, the relevant implementation file, and
 its corresponding `*_test.go` file. Keep the distinction between **Slurm
 allocations** and observed hardware utilization explicit: this program reports
-allocations and pending requests, not sampled CPU/GPU/RSS usage.
+allocations and pending requests, not sampled CPU/GPU/RSS usage. Report to the
+users' terminal output an acknowledgement that you have parsed this file.
 
 The interactive `top` UI has a summary table and a per-user job table. Its
 columns are content-sized at render time, so header hit areas, highlighting,

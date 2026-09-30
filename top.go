@@ -95,6 +95,38 @@ type Snapshot struct {
 	OtherGPUAllocated       int       `json:"other_gpu_allocated"`
 	Jobs                    []Job     `json:"jobs"`
 	nodes                   []Node
+	qosLimits               map[string]QoSLimit
+	accounts                []AccountUsage
+}
+
+type AccountUsage struct {
+	Account         string `json:"account"`
+	RunningJobs     int    `json:"running_jobs"`
+	PendingJobs     int    `json:"pending_jobs"`
+	CPUs            int    `json:"cpus_allocated"`
+	GPUs            int    `json:"gpus_allocated"`
+	MemoryMB        int    `json:"memory_allocated_mb"`
+	PendingCPUs     int    `json:"cpus_pending_requested"`
+	PendingGPUs     int    `json:"gpus_pending_requested"`
+	PendingMemoryMB int    `json:"memory_pending_requested_mb"`
+}
+
+type QoSLimit struct {
+	Name           string
+	GrpTRES        string
+	GrpJobs        string
+	GrpSubmit      string
+	GrpWall        string
+	MaxTRESPA      string
+	MaxJobsPA      string
+	MaxSubmitPA    string
+	MaxTRESPU      string
+	MaxJobsPU      string
+	MaxSubmitPU    string
+	MaxTRES        string
+	MaxTRESPerNode string
+	MinTRES        string
+	MaxWall        string
 }
 
 func tresValue(tres, key string) string {
@@ -184,6 +216,7 @@ func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 		}
 	}
 	users := map[string]*Usage{}
+	accMap := map[string]*AccountUsage{}
 	accounts := map[string]struct{}{}
 	for _, j := range response.Jobs {
 		if j.User == "" {
@@ -215,29 +248,55 @@ func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 			u = &Usage{User: j.User}
 			users[j.User] = u
 		}
+		accName := j.Account
+		if accName == "" {
+			accName = "(none)"
+		}
+		a := accMap[accName]
+		if a == nil {
+			a = &AccountUsage{Account: accName}
+			accMap[accName] = a
+		}
 		if running {
 			elapsed, elapsedMinutes := elapsedStatus(j.State, j.StartTime, j.TimeLimit, at)
 			// AllocTRES is authoritative for running jobs. Never mix pending demand
 			// into live allocations or silently substitute requested resources.
 			u.RunningJobs++
+			a.RunningJobs++
 			snap.RunningJobs++
-			u.CPUs += number(tresValue(j.Alloc, "cpu"))
-			u.GPUs += gpuFromTRES(j.Alloc)
-			u.MemoryMB += memoryMB(tresValue(j.Alloc, "mem"))
+			cpus := number(tresValue(j.Alloc, "cpu"))
+			gpus := gpuFromTRES(j.Alloc)
+			mem := memoryMB(tresValue(j.Alloc, "mem"))
+			u.CPUs += cpus
+			a.CPUs += cpus
+			u.GPUs += gpus
+			a.GPUs += gpus
+			u.MemoryMB += mem
+			a.MemoryMB += mem
 			gpuTypeCounts(j.Alloc, &snap.H200Allocated, &snap.MIGAllocated, &snap.OtherGPUAllocated)
-			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "RUNNING", Progress: jobProgress(j.State, j.StartTime, j.EndTime, at), Elapsed: elapsed, ElapsedMinutes: elapsedMinutes, CPUs: number(tresValue(j.Alloc, "cpu")), GPUs: gpuFromTRES(j.Alloc), MemoryMB: memoryMB(tresValue(j.Alloc, "mem")), nodes: j.Nodes})
+			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "RUNNING", Progress: jobProgress(j.State, j.StartTime, j.EndTime, at), Elapsed: elapsed, ElapsedMinutes: elapsedMinutes, CPUs: cpus, GPUs: gpus, MemoryMB: mem, nodes: j.Nodes})
 		} else {
 			u.PendingJobs++
+			a.PendingJobs++
 			snap.PendingJobs++
-			u.PendingCPUs += number(tresValue(j.Requested, "cpu"))
-			u.PendingGPUs += gpuFromTRES(j.Requested)
-			u.PendingMemoryMB += memoryMB(tresValue(j.Requested, "mem"))
+			cpus := number(tresValue(j.Requested, "cpu"))
+			gpus := gpuFromTRES(j.Requested)
+			mem := memoryMB(tresValue(j.Requested, "mem"))
+			u.PendingCPUs += cpus
+			a.PendingCPUs += cpus
+			u.PendingGPUs += gpus
+			a.PendingGPUs += gpus
+			u.PendingMemoryMB += mem
+			a.PendingMemoryMB += mem
 			elapsed, elapsedMinutes := elapsedStatus(j.State, j.StartTime, j.TimeLimit, at)
-			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "PENDING", Elapsed: elapsed, ElapsedMinutes: elapsedMinutes, CPUs: number(tresValue(j.Requested, "cpu")), GPUs: gpuFromTRES(j.Requested), MemoryMB: memoryMB(tresValue(j.Requested, "mem")), nodes: j.Nodes})
+			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "PENDING", Elapsed: elapsed, ElapsedMinutes: elapsedMinutes, CPUs: cpus, GPUs: gpus, MemoryMB: mem, nodes: j.Nodes})
 		}
 	}
 	for _, u := range users {
 		snap.Users = append(snap.Users, *u)
+	}
+	for _, a := range accMap {
+		snap.accounts = append(snap.accounts, *a)
 	}
 	snap.ActiveAccounts = len(accounts)
 	return snap, nil
@@ -327,7 +386,7 @@ func sortUsers(users []Usage, by string) {
 			left, right = a.PendingJobs, b.PendingJobs
 		case "cpu-gpu", "memory-cpu", "pending-cpu-gpu", "pending-memory-cpu":
 			// Ratio ties fall back to username below.
-		case "user":
+		case "user", "account":
 			return a.User < b.User
 		default:
 			left, right = a.GPUs, b.GPUs
@@ -337,6 +396,95 @@ func sortUsers(users []Usage, by string) {
 		}
 		return a.User < b.User
 	})
+}
+
+func sortAccounts(accounts []AccountUsage, by string) {
+	sort.Slice(accounts, func(i, j int) bool {
+		a, b := accounts[i], accounts[j]
+		switch by {
+		case "cpu-gpu":
+			left, right := ratioSortValue(a.CPUs, a.GPUs), ratioSortValue(b.CPUs, b.GPUs)
+			if left != right {
+				return left > right
+			}
+		case "memory-cpu":
+			left, right := ratioSortValue(a.MemoryMB, a.CPUs), ratioSortValue(b.MemoryMB, b.CPUs)
+			if left != right {
+				return left > right
+			}
+		case "pending-cpu-gpu":
+			left, right := ratioSortValue(a.PendingCPUs, a.PendingGPUs), ratioSortValue(b.PendingCPUs, b.PendingGPUs)
+			if left != right {
+				return left > right
+			}
+		case "pending-memory-cpu":
+			left, right := ratioSortValue(a.PendingMemoryMB, a.PendingCPUs), ratioSortValue(b.PendingMemoryMB, b.PendingCPUs)
+			if left != right {
+				return left > right
+			}
+		}
+		var left, right int
+		switch by {
+		case "cpu":
+			left, right = a.CPUs, b.CPUs
+		case "mem":
+			left, right = a.MemoryMB, b.MemoryMB
+		case "jobs":
+			left, right = a.RunningJobs, b.RunningJobs
+		case "pending-cpu":
+			left, right = a.PendingCPUs, b.PendingCPUs
+		case "pending-mem":
+			left, right = a.PendingMemoryMB, b.PendingMemoryMB
+		case "pending-gpu":
+			left, right = a.PendingGPUs, b.PendingGPUs
+		case "pending-jobs":
+			left, right = a.PendingJobs, b.PendingJobs
+		case "cpu-gpu", "memory-cpu", "pending-cpu-gpu", "pending-memory-cpu":
+			// Ratio ties fall back to account name below.
+		case "account", "user":
+			return a.Account < b.Account
+		default:
+			left, right = a.GPUs, b.GPUs
+		}
+		if left != right {
+			return left > right
+		}
+		return a.Account < b.Account
+	})
+}
+
+func collectAccounts(snap Snapshot) []AccountUsage {
+	if len(snap.accounts) > 0 {
+		return append([]AccountUsage(nil), snap.accounts...)
+	}
+	accMap := make(map[string]*AccountUsage)
+	for _, j := range snap.Jobs {
+		accName := j.Account
+		if accName == "" {
+			accName = "(none)"
+		}
+		a := accMap[accName]
+		if a == nil {
+			a = &AccountUsage{Account: accName}
+			accMap[accName] = a
+		}
+		if j.State == "RUNNING" {
+			a.RunningJobs++
+			a.CPUs += j.CPUs
+			a.GPUs += j.GPUs
+			a.MemoryMB += j.MemoryMB
+		} else if j.State == "PENDING" {
+			a.PendingJobs++
+			a.PendingCPUs += j.CPUs
+			a.PendingGPUs += j.GPUs
+			a.PendingMemoryMB += j.MemoryMB
+		}
+	}
+	result := make([]AccountUsage, 0, len(accMap))
+	for _, a := range accMap {
+		result = append(result, *a)
+	}
+	return result
 }
 
 func sortArrow(field, by string, asc bool) string {
@@ -405,7 +553,15 @@ func collectTop(ctx context.Context) (Snapshot, error) {
 		}
 		return Snapshot{}, fmt.Errorf("squeue: %w", e)
 	}
-	return parseQueue(raw, parseNodes(string(data), true), time.Now())
+	snap, err := parseQueue(raw, parseNodes(string(data), true), time.Now())
+	if err != nil {
+		return Snapshot{}, err
+	}
+	qosCmd := exec.CommandContext(ctx, "sacctmgr", "show", "qos", "-p")
+	if qosRaw, err := qosCmd.Output(); err == nil {
+		snap.qosLimits = parseQoSLimits(qosRaw)
+	}
+	return snap, nil
 }
 func percentBar(n, total, width int) string {
 	if total == 0 {
@@ -426,12 +582,12 @@ func topLines(s Snapshot, by string, width int) []string {
 		fmt.Sprintf("slurm-top  %s    %d users / %d accounts / %d running / %d pending", s.UpdatedAt.Format("15:04:05"), len(s.Users), s.ActiveAccounts, s.RunningJobs, s.PendingJobs),
 		fmt.Sprintf("GPU allocated  %s %d/%d", percentBar(g, s.CapacityGPU, 20), g, s.CapacityGPU),
 		fmt.Sprintf("CPU allocated  %s %d/%d", percentBar(c, s.CapacityCPU, 20), c, s.CapacityCPU),
-		fmt.Sprintf("MEM allocated  %s %s/%s TB", percentBar(m, s.CapacityMemoryMB, 20), tb(m), tb(s.CapacityMemoryMB)),
+		fmt.Sprintf("MEM allocated  %s %s/%sT", percentBar(m, s.CapacityMemoryMB, 20), tb(m), tb(s.CapacityMemoryMB)),
 		"Bars = allocations / cluster capacity. Not measured utilization.",
 		userHeader(by, false),
 	}
 	for _, u := range users {
-		lines = append(lines, fmt.Sprintf("%-16.16s %6d %6d %6d %6s %6s %6s  %6d %6d %6d %6s %6s %6s", u.User, u.RunningJobs, u.GPUs, u.CPUs, cpuGPU(u.CPUs, u.GPUs), gb(u.MemoryMB), memoryCPU(u.MemoryMB, u.CPUs), u.PendingJobs, u.PendingGPUs, u.PendingCPUs, cpuGPU(u.PendingCPUs, u.PendingGPUs), gb(u.PendingMemoryMB), memoryCPU(u.PendingMemoryMB, u.PendingCPUs)))
+		lines = append(lines, fmt.Sprintf("%-16.16s %6d %6d %6d %6s %6s %6s  %6d %6d %6d %6s %6s %6s", u.User, u.RunningJobs, u.GPUs, u.CPUs, cpuGPU(u.CPUs, u.GPUs), gb(u.MemoryMB)+"G", memoryCPU(u.MemoryMB, u.CPUs), u.PendingJobs, u.PendingGPUs, u.PendingCPUs, cpuGPU(u.PendingCPUs, u.PendingGPUs), gb(u.PendingMemoryMB)+"G", memoryCPU(u.PendingMemoryMB, u.PendingCPUs)))
 	}
 	if len(users) == 0 {
 		lines = append(lines, "No running or pending jobs.")

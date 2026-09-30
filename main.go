@@ -275,7 +275,7 @@ func render(w io.Writer, nodes []Node, format string, at time.Time) error {
 	}
 	fmt.Fprintf(w, "Slurm nodes  %s  |  GPUs %d allocated / %d total, %d on allocatable nodes\n", at.Format(time.RFC3339), alloc, total, free)
 	t := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(t, "NODE\tSTATE\tGPU TYPE\tGPU ALLOC/TOTAL\tCPU ALLOC/TOTAL\tCPU LOAD\tMEM ALLOC GB\tMEM USED ~\tMEM FREE GB")
+	fmt.Fprintln(t, "NODE\tSTATE\tGPU TYPE\tGPU ALLOC/TOTAL\tCPU ALLOC/TOTAL\tCPU LOAD\tMEM ALLOC G\tMEM USED ~\tMEM FREE G")
 	for _, n := range nodes {
 		load, mem, used := "-", "-", "-"
 		if n.CPULoad != nil {
@@ -285,7 +285,7 @@ func render(w io.Writer, nodes []Node, format string, at time.Time) error {
 			mem = gb(*n.MemoryFreeMB)
 		}
 		if n.MemoryUsedApproxMB != nil {
-			used = fmt.Sprintf("%s GB (%.0f%%)", gb(*n.MemoryUsedApproxMB), float64(*n.MemoryUsedApproxMB)*100/float64(n.MemoryTotalMB))
+			used = fmt.Sprintf("%sG (%.0f%%)", gb(*n.MemoryUsedApproxMB), float64(*n.MemoryUsedApproxMB)*100/float64(n.MemoryTotalMB))
 		}
 		fmt.Fprintf(t, "%s\t%s\t%s\t%s\t%s\t%s\t%s/%s\t%s\t%s\n", n.Name, n.State, n.GPUType, ratio(n.GPUAllocated, n.GPUTotal), ratio(n.CPUAllocated, n.CPUTotal), load, gb(n.MemoryAllocatedMB), gb(n.MemoryTotalMB), used, mem)
 	}

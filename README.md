@@ -94,13 +94,13 @@ The summary defaults to running GPU allocation descending; opening a user
 shows that user's jobs sorted by elapsed time descending. Use **Up/Down** or
 the mouse wheel to select a user, **Right** or **Enter** to open their job
 list, and **Left** or **Escape** to return. Returning restores the prior
-summary sort and selection. The menu shows `JOBS` and `NODES`; the active
-lower-pane view is highlighted. The selected user's job table also uses the
-`JOBS` menu label. Use **Tab** and **Shift-Tab** to cycle through `JOBS` and
-`NODES`. The selected user's jobs are opened from `JOBS` with **Right** or
-**Enter**. You can also click the `JOBS` or `NODES` menu item to select it. A
+summary sort and selection. The menu shows `USER`, `ACCOUNT`, `QOS`, and `NODES`; the active
+lower-pane view is highlighted. The selected user's job table uses the
+`USER` menu label, an account's job table uses the `ACCOUNT` menu label, and a QoS details view uses the `QOS` menu label. Use **Tab** and **Shift-Tab** to cycle through `USER`, `ACCOUNT`, `QOS`, and
+`NODES`. The selected user's or account's jobs, or a QoS's details, are opened with **Right** or
+**Enter**. You can also click the `USER`, `ACCOUNT`, `QOS`, or `NODES` menu item to select it. A
 horizontal rule separates the menu from the
-current view. In `NODES`, directional arrows select nodes in the displayed grid;
+current view. In `QOS`, a table displays Quality of Service allocations and pending demand across sortable columns. Selecting a QoS row and pressing **Right** or **Enter** opens that QoS's scrollable details view displaying job states, running allocations, pending requests, runtime/elapsed metrics, limits, users, accounts, partitions, nodes, and jobs; press **Escape** or **Left** to return to the QOS table. In `NODES`, directional arrows select nodes in the displayed grid;
 clicking a node or pressing **Enter** replaces the grid with that node's
 scrollable details. The details begin with the node, state, and available boot
 time, followed by `ALLOCATED` and `UTILIZED` boxes containing GPU, `GPU MEM`,
@@ -119,7 +119,7 @@ next Enter. Click a column heading to sort (click again to reverse it), or
 click a summary row to open that user's jobs. In a job table that is wider than the terminal, use
 **Left/Right** while a row is focused to scroll horizontally; **Left** at its
 left edge returns to the summary. Keyboard sorting shortcuts are `g` (GPU),
-`c` (CPU), `m` (memory), `j` (running jobs), and `u` (username); `r` refreshes;
+`c` (CPU), `m` (memory), `j` (running jobs), `u` (user), and `a` (account); `r` refreshes;
 `q` or Ctrl-C exits.
 
 Summary columns show running and pending `GPU`, `CPU`, `C:G` (CPU per GPU),
@@ -151,8 +151,8 @@ color in supported node displays.
   `squeue --json`. Elapsed time is rendered as
   `percent% [elapsed|requested]`; unknown or unlimited requested time displays
   `-`.
-- Memory values in tables are rounded decimal GB; aggregate memory summaries
-  use decimal TB.
+- Memory values in tables are rounded decimal GB (displayed as G); aggregate memory summaries
+  use decimal TB (displayed as T).
 - A failed refresh retains the prior interactive snapshot and reports the
   error.
 

@@ -156,6 +156,8 @@ func sortJobs(jobs []Job, by string, asc bool) {
 		switch by {
 		case "account":
 			cmp = strings.Compare(a.Account, b.Account)
+		case "user":
+			cmp = strings.Compare(a.User, b.User)
 		case "name":
 			cmp = strings.Compare(a.Name, b.Name)
 		case "qos":
@@ -285,7 +287,7 @@ func topRows(s Snapshot, user, by string, asc bool, color ...bool) ([]string, []
 		ids := make([]string, 0, len(users))
 		for _, u := range users {
 			ids = append(ids, u.User)
-			rows = append(rows, []string{u.User, strconv.Itoa(u.RunningJobs), strconv.Itoa(u.GPUs), strconv.Itoa(u.CPUs), cpuGPU(u.CPUs, u.GPUs), gb(u.MemoryMB), memoryCPU(u.MemoryMB, u.CPUs), strconv.Itoa(u.PendingJobs), strconv.Itoa(u.PendingGPUs), strconv.Itoa(u.PendingCPUs), cpuGPU(u.PendingCPUs, u.PendingGPUs), gb(u.PendingMemoryMB), memoryCPU(u.PendingMemoryMB, u.PendingCPUs)})
+			rows = append(rows, []string{u.User, strconv.Itoa(u.RunningJobs), strconv.Itoa(u.GPUs), strconv.Itoa(u.CPUs), cpuGPU(u.CPUs, u.GPUs), gb(u.MemoryMB) + "G", memoryCPU(u.MemoryMB, u.CPUs), strconv.Itoa(u.PendingJobs), strconv.Itoa(u.PendingGPUs), strconv.Itoa(u.PendingCPUs), cpuGPU(u.PendingCPUs, u.PendingGPUs), gb(u.PendingMemoryMB) + "G", memoryCPU(u.PendingMemoryMB, u.PendingCPUs)})
 		}
 		header, lines, headerColumns := renderTable(columns, rows, by, asc)
 		return []string{header}, lines, ids, headerColumns
@@ -302,7 +304,49 @@ func topRows(s Snapshot, user, by string, asc bool, color ...bool) ([]string, []
 	ids := make([]string, 0, len(jobs))
 	for _, j := range jobs {
 		ids = append(ids, strconv.Itoa(j.ID)+"/"+j.State)
-		rows = append(rows, []string{strconv.Itoa(j.ID), j.Account, displayQoS(j.QoS, colorEnabled), progressBar(j.Progress, 10, colorEnabled), j.Elapsed, j.Partition, strconv.Itoa(j.GPUs), strconv.Itoa(j.CPUs), cpuGPU(j.CPUs, j.GPUs), gb(j.MemoryMB), memoryCPU(j.MemoryMB, j.CPUs), j.Name})
+		rows = append(rows, []string{strconv.Itoa(j.ID), j.Account, displayQoS(j.QoS, colorEnabled), progressBar(j.Progress, 10, colorEnabled), j.Elapsed, j.Partition, strconv.Itoa(j.GPUs), strconv.Itoa(j.CPUs), cpuGPU(j.CPUs, j.GPUs), gb(j.MemoryMB) + "G", memoryCPU(j.MemoryMB, j.CPUs), j.Name})
+	}
+	header, lines, headerColumns := renderTable(columns, rows, by, asc)
+	return []string{header}, lines, ids, headerColumns
+}
+
+func accountRows(s Snapshot, account, by string, asc bool, color ...bool) ([]string, []string, []string, []headerColumn) {
+	colorEnabled := len(color) > 0 && color[0]
+	if account == "" {
+		accounts := collectAccounts(s)
+		sortAccounts(accounts, by)
+		if asc {
+			for i, j := 0, len(accounts)-1; i < j; i, j = i+1, j-1 {
+				accounts[i], accounts[j] = accounts[j], accounts[i]
+			}
+		}
+		columns := []tableColumn{{"account", "ACCOUNT"}, {"jobs", "RUN"}, {"gpu", "GPU"}, {"cpu", "CPU"}, {"cpu-gpu", "C:G"}, {"mem", "MEM"}, {"memory-cpu", "M:C"}, {"pending-jobs", "PEND"}, {"pending-gpu", "GPU"}, {"pending-cpu", "CPU"}, {"pending-cpu-gpu", "C:G"}, {"pending-mem", "MEM"}, {"pending-memory-cpu", "M:C"}}
+		rows := make([][]string, 0, len(accounts))
+		ids := make([]string, 0, len(accounts))
+		for _, a := range accounts {
+			ids = append(ids, a.Account)
+			rows = append(rows, []string{a.Account, strconv.Itoa(a.RunningJobs), strconv.Itoa(a.GPUs), strconv.Itoa(a.CPUs), cpuGPU(a.CPUs, a.GPUs), gb(a.MemoryMB) + "G", memoryCPU(a.MemoryMB, a.CPUs), strconv.Itoa(a.PendingJobs), strconv.Itoa(a.PendingGPUs), strconv.Itoa(a.PendingCPUs), cpuGPU(a.PendingCPUs, a.PendingGPUs), gb(a.PendingMemoryMB) + "G", memoryCPU(a.PendingMemoryMB, a.PendingCPUs)})
+		}
+		header, lines, headerColumns := renderTable(columns, rows, by, asc)
+		return []string{header}, lines, ids, headerColumns
+	}
+	jobs := []Job{}
+	for _, j := range s.Jobs {
+		acc := j.Account
+		if acc == "" {
+			acc = "(none)"
+		}
+		if acc == account {
+			jobs = append(jobs, j)
+		}
+	}
+	sortJobs(jobs, by, asc)
+	columns := []tableColumn{{"id", "JOB ID"}, {"user", "USER"}, {"qos", "QOS"}, {"progress", "PROGRESS"}, {"elapsed", "ELAPSED"}, {"partition", "PARTITION"}, {"gpu", "GPU"}, {"cpu", "CPU"}, {"cpu-gpu", "C:G"}, {"mem", "MEM"}, {"memory-cpu", "M:C"}, {"name", "NAME"}}
+	rows := make([][]string, 0, len(jobs))
+	ids := make([]string, 0, len(jobs))
+	for _, j := range jobs {
+		ids = append(ids, strconv.Itoa(j.ID)+"/"+j.State)
+		rows = append(rows, []string{strconv.Itoa(j.ID), j.User, displayQoS(j.QoS, colorEnabled), progressBar(j.Progress, 10, colorEnabled), j.Elapsed, j.Partition, strconv.Itoa(j.GPUs), strconv.Itoa(j.CPUs), cpuGPU(j.CPUs, j.GPUs), gb(j.MemoryMB) + "G", memoryCPU(j.MemoryMB, j.CPUs), j.Name})
 	}
 	header, lines, headerColumns := renderTable(columns, rows, by, asc)
 	return []string{header}, lines, ids, headerColumns
@@ -500,12 +544,20 @@ func statBox(label string, content ...string) []string {
 }
 
 func paneMenuLabel(pane string) string {
-	return map[string]string{"cluster": "JOBS", "user": "JOBS", "gpu": "NODES"}[pane]
+	return map[string]string{
+		"cluster":      "USER",
+		"user":         "USER",
+		"account":      "ACCOUNT",
+		"account-jobs": "ACCOUNT",
+		"qos":          "QOS",
+		"qos-details":  "QOS",
+		"gpu":          "NODES",
+	}[pane]
 }
 
 // viewMenu presents every lower-pane view and highlights the active label.
 func viewMenu(active string) []string {
-	labels := []string{"JOBS", "NODES"}
+	labels := []string{"USER", "ACCOUNT", "QOS", "NODES"}
 	for i, label := range labels {
 		padded := " " + label + " "
 		if label == active {
@@ -520,7 +572,7 @@ func viewMenu(active string) []string {
 func menuColumns() []headerColumn {
 	labels := []struct {
 		field, label string
-	}{{"cluster", "JOBS"}, {"gpu", "NODES"}}
+	}{{"cluster", "USER"}, {"account", "ACCOUNT"}, {"qos", "QOS"}, {"gpu", "NODES"}}
 	columns := make([]headerColumn, len(labels))
 	start := 1
 	for i, item := range labels {
@@ -531,16 +583,28 @@ func menuColumns() []headerColumn {
 	return columns
 }
 
-// cycleTopPane skips USER because a user-specific job view can only be opened
-// from CLUSTER with Enter or Right.
+// cycleTopPane skips USER, ACCOUNT, and QOS details views because a specific detail view can only be opened
+// from the summary view with Enter or Right.
 func cycleTopPane(pane string, reverse bool) string {
 	if pane == "user" {
 		if reverse {
 			return "cluster"
 		}
+		return "account"
+	}
+	if pane == "account-jobs" {
+		if reverse {
+			return "account"
+		}
+		return "qos"
+	}
+	if pane == "qos-details" {
+		if reverse {
+			return "qos"
+		}
 		return "gpu"
 	}
-	panes := []string{"cluster", "gpu"}
+	panes := []string{"cluster", "account", "qos", "gpu"}
 	for i, candidate := range panes {
 		if pane != candidate {
 			continue
@@ -572,8 +636,8 @@ func horizontalBars(s Snapshot, width int, colored ...bool) []string {
 		usageValueFor(cpu, s.AllocatableCPU, strconv.Itoa(cpu), strconv.Itoa(s.AllocatableCPU), true),
 		usageValueFor(s.CapacityCPU-s.AllocatableCPU, s.CapacityCPU, strconv.Itoa(s.CapacityCPU-s.AllocatableCPU), strconv.Itoa(s.CapacityCPU), false))
 	memInfo, memUnavailable := usagePair(
-		usageValueFor(mem, s.AllocatableMemoryMB, tb(mem), tb(s.AllocatableMemoryMB)+" TB", true),
-		usageValueFor(s.CapacityMemoryMB-s.AllocatableMemoryMB, s.CapacityMemoryMB, tb(s.CapacityMemoryMB-s.AllocatableMemoryMB), tb(s.CapacityMemoryMB)+" TB", false))
+		usageValueFor(mem, s.AllocatableMemoryMB, tb(mem), tb(s.AllocatableMemoryMB)+"T", true),
+		usageValueFor(s.CapacityMemoryMB-s.AllocatableMemoryMB, s.CapacityMemoryMB, tb(s.CapacityMemoryMB-s.AllocatableMemoryMB), tb(s.CapacityMemoryMB)+"T", false))
 	h200Info, h200Unavailable := usagePair(
 		usageValueFor(s.AllocatableH200Used, s.AllocatableH200, strconv.Itoa(s.AllocatableH200Used), strconv.Itoa(s.AllocatableH200), true),
 		usageValueFor(s.H200Capacity-s.AllocatableH200, s.H200Capacity, strconv.Itoa(s.H200Capacity-s.AllocatableH200), strconv.Itoa(s.H200Capacity), false))
@@ -598,6 +662,15 @@ func horizontalBars(s Snapshot, width int, colored ...bool) []string {
 		return all
 	}
 	return append(gpuBox, joinStatBoxes(cpuBox, memBox)...)
+}
+
+// clusterBoxesWidth returns the combined width of the 3 top cluster-wide boxes for GPU, CPU, and MEM.
+func clusterBoxesWidth(s Snapshot) int {
+	bars := horizontalBars(s, 999999, false)
+	if len(bars) > 0 {
+		return visibleWidth(bars[0])
+	}
+	return 80
 }
 func wrapPaneText(text string, width int) []string {
 	if width < 1 {
@@ -818,7 +891,7 @@ func nodeStatusContents(n Node, available, color bool) []nodeBarContent {
 	}
 	cpu := nodeResourceContent("", cpuUsed, cpuUsable, n.CPUTotal, strconv.Itoa(cpuUsed), strconv.Itoa(cpuUsable), strconv.Itoa(n.CPUTotal-cpuUsable), strconv.Itoa(n.CPUTotal), color)
 	cpu.heading = "CPU"
-	mem := nodeResourceContent("", memUsed, memUsable, n.MemoryTotalMB, gb(memUsed), gb(memUsable)+" GB", gb(n.MemoryTotalMB-memUsable), gb(n.MemoryTotalMB)+" GB", color)
+	mem := nodeResourceContent("", memUsed, memUsable, n.MemoryTotalMB, gb(memUsed), gb(memUsable)+"G", gb(n.MemoryTotalMB-memUsable), gb(n.MemoryTotalMB)+"G", color)
 	mem.heading = "MEM"
 	return append(contents, cpu, mem)
 }
@@ -844,7 +917,7 @@ func nodeUtilizationResourceContent(label string, used *int, total int, totalTex
 		return nodeBarContent{status: label + bar, info: strings.Repeat(" ", visibleWidth(label)) + info, unavailable: strings.Repeat(" ", visibleWidth(label)+visibleWidth(info))}
 	}
 	info := usageValueFor(*used, total, strconv.Itoa(*used), totalText, true)
-	if strings.HasSuffix(totalText, " GB") {
+	if strings.HasSuffix(totalText, "G") || strings.HasSuffix(totalText, " GB") {
 		info = usageValueFor(*used, total, gb(*used), totalText, true)
 	}
 	text, _ := usagePair(info, usageValue{})
@@ -878,13 +951,13 @@ func nodeUtilizationBars(n Node, _ int, color bool) []string {
 		cpuTotal, memoryTotal, memoryUsed = 0, 0, nil
 	}
 	if n.GPUTotal > 0 {
-		gpuMemory := nodeUtilizationResourceContent("", memoryUsed, memoryTotal, gb(memoryTotal)+" GB", color)
+		gpuMemory := nodeUtilizationResourceContent("", memoryUsed, memoryTotal, gb(memoryTotal)+"G", color)
 		gpuMemory.heading = "GPU MEM"
 		contents = append(contents, gpuMemory)
 	}
 	cpu := nodeUtilizationResourceContent("", nil, cpuTotal, strconv.Itoa(cpuTotal), color)
 	cpu.heading = "CPU"
-	mem := nodeUtilizationResourceContent("", memoryUsed, memoryTotal, gb(memoryTotal)+" GB", color)
+	mem := nodeUtilizationResourceContent("", memoryUsed, memoryTotal, gb(memoryTotal)+"G", color)
 	mem.heading = "MEM"
 	return nodeBarBox("UTILIZED", append(contents, cpu, mem))
 }
@@ -894,11 +967,11 @@ func nodeUtilizationBars(n Node, _ int, color bool) []string {
 func nodeJobUtilizationBars(job Job, color bool) []string {
 	gpu := nodeUtilizationResourceContent("", nil, job.GPUs, strconv.Itoa(job.GPUs), color)
 	gpu.heading = "GPU"
-	gpuMemory := nodeUtilizationResourceContent("", nil, job.MemoryMB, gb(job.MemoryMB)+" GB", color)
+	gpuMemory := nodeUtilizationResourceContent("", nil, job.MemoryMB, gb(job.MemoryMB)+"G", color)
 	gpuMemory.heading = "GPU MEM"
 	cpu := nodeUtilizationResourceContent("", nil, job.CPUs, strconv.Itoa(job.CPUs), color)
 	cpu.heading = "CPU"
-	mem := nodeUtilizationResourceContent("", nil, job.MemoryMB, gb(job.MemoryMB)+" GB", color)
+	mem := nodeUtilizationResourceContent("", nil, job.MemoryMB, gb(job.MemoryMB)+"G", color)
 	mem.heading = "MEM"
 	label := fmt.Sprintf("%d • %s • %s", job.ID, printable(job.User), printable(job.Account))
 	return nodeBarBox(label, []nodeBarContent{gpu, gpuMemory, cpu, mem})
@@ -1024,6 +1097,29 @@ func userJobStats(s Snapshot, user string) (accounts, running, pending int) {
 	return len(seen), running, pending
 }
 
+func accountJobStats(s Snapshot, account string) (users, running, pending int) {
+	seen := map[string]struct{}{}
+	for _, job := range s.Jobs {
+		acc := job.Account
+		if acc == "" {
+			acc = "(none)"
+		}
+		if acc != account {
+			continue
+		}
+		if job.User != "" {
+			seen[job.User] = struct{}{}
+		}
+		switch job.State {
+		case "RUNNING":
+			running++
+		case "PENDING":
+			pending++
+		}
+	}
+	return len(seen), running, pending
+}
+
 func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort string) error {
 	if !term.IsTerminal(int(in.Fd())) || !term.IsTerminal(int(out.Fd())) || os.Getenv("TERM") == "dumb" {
 		return fmt.Errorf("interactive mode requires terminal stdin and stdout")
@@ -1058,7 +1154,12 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 	defer ticker.Stop()
 	pane, user, by, asc, selected, scroll, message := "cluster", "", initialSort, false, 0, 0, ""
 	summaryBy, summaryAsc, returnUser := initialSort, false, ""
-	nodeSelected, nodeScroll, detailScroll, hScroll, tableWidth := 0, 0, 0, 0, 0
+	account, accountSummaryBy, accountSummaryAsc, returnAccount := "", initialSort, false, ""
+	selectedQoS, qosSummaryBy, qosSummaryAsc, returnQoS := "", initialSort, false, ""
+	userSelected, userScroll := 0, 0
+	accountSelected, accountScroll := 0, 0
+	qosSelected, qosScroll := 0, 0
+	nodeSelected, nodeScroll, detailScroll, qosDetailScroll, hScroll, tableWidth := 0, 0, 0, 0, 0, 0
 	nodeDetailsOpen := false
 	headerFocused, selectedHeader, headerActivated := false, 0, false
 	width, height, menuStartY, headerY, rows := 80, 24, 2, 5, 1
@@ -1085,18 +1186,34 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 		if rows < 1 {
 			rows = 1
 		}
-		isTable := pane == "cluster" || pane == "user"
+		isTable := pane == "cluster" || pane == "user" || pane == "account" || pane == "account-jobs" || pane == "qos"
 		tableContentWidth := width - 1
 		var headers, items []string
 		if isTable {
-			tableUser := ""
-			if pane == "user" {
-				tableUser = user
+			if pane == "account" || pane == "account-jobs" {
+				tableAccount := ""
+				if pane == "account-jobs" {
+					tableAccount = account
+				}
+				var rowIDs []string
+				var currentColumns []headerColumn
+				headers, items, rowIDs, currentColumns = accountRows(s, tableAccount, by, asc, colorBars)
+				ids, columns = rowIDs, currentColumns
+			} else if pane == "qos" {
+				var rowIDs []string
+				var currentColumns []headerColumn
+				headers, items, rowIDs, currentColumns = qosRows(s, by, asc, colorBars)
+				ids, columns = rowIDs, currentColumns
+			} else {
+				tableUser := ""
+				if pane == "user" {
+					tableUser = user
+				}
+				var rowIDs []string
+				var currentColumns []headerColumn
+				headers, items, rowIDs, currentColumns = topRows(s, tableUser, by, asc, colorBars)
+				ids, columns = rowIDs, currentColumns
 			}
-			var rowIDs []string
-			var currentColumns []headerColumn
-			headers, items, rowIDs, currentColumns = topRows(s, tableUser, by, asc, colorBars)
-			ids, columns = rowIDs, currentColumns
 			tableWidth = utf8.RuneCountInString(sgrPattern.ReplaceAllString(headers[0], ""))
 			for _, item := range items {
 				tableWidth = max(tableWidth, utf8.RuneCountInString(sgrPattern.ReplaceAllString(item, "")))
@@ -1104,7 +1221,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 			if len(items) > rows {
 				tableContentWidth = max(1, width-2) // reserve the rightmost cell for the scrollbar
 			}
-			if pane == "cluster" {
+			if pane == "cluster" || pane == "account" || pane == "qos" {
 				hScroll = 0
 			} else {
 				hScroll = min(hScroll, max(0, tableWidth-tableContentWidth))
@@ -1116,13 +1233,31 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				selectedHeader = 0
 			}
 			if pane == "cluster" && returnUser != "" {
-				for i, id := range rowIDs {
+				for i, id := range ids {
 					if id == returnUser {
 						selected = i
 						break
 					}
 				}
 				returnUser = ""
+			}
+			if pane == "account" && returnAccount != "" {
+				for i, id := range ids {
+					if id == returnAccount {
+						selected = i
+						break
+					}
+				}
+				returnAccount = ""
+			}
+			if pane == "qos" && returnQoS != "" {
+				for i, id := range ids {
+					if id == returnQoS {
+						selected = i
+						break
+					}
+				}
+				returnQoS = ""
 			}
 			if len(items) == 0 {
 				selected, scroll = 0, 0
@@ -1148,6 +1283,11 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 		if pane == "user" {
 			accounts, running, pending := userJobStats(s, user)
 			title = fmt.Sprintf("slurm-top  %s  1 user / %d accounts / %d running / %d pending  %s", s.UpdatedAt.Format("15:04:05"), accounts, running, pending, user)
+		} else if pane == "account-jobs" {
+			users, running, pending := accountJobStats(s, account)
+			title = fmt.Sprintf("slurm-top  %s  %d users / 1 account / %d running / %d pending  %s", s.UpdatedAt.Format("15:04:05"), users, running, pending, account)
+		} else if pane == "qos-details" {
+			title = fmt.Sprintf("slurm-top  %s  QoS: %s", s.UpdatedAt.Format("15:04:05"), selectedQoS)
 		}
 		fmt.Fprint(&b, fit(title, width-1), "\r\n")
 		for _, line := range bars {
@@ -1167,7 +1307,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				header = highlightHeader(header, columns[selectedHeader])
 			}
 			offset := 0
-			if pane == "user" {
+			if pane == "user" || pane == "account-jobs" {
 				offset = hScroll
 			}
 			marker := ""
@@ -1182,6 +1322,15 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					line = "\x1b[7m" + line + "\x1b[0m"
 				}
 				fmt.Fprint(&b, line, scrollMarker(i-scroll, rows, scroll, maxScroll), "\r\n")
+			}
+		} else if pane == "qos-details" {
+			visibleRows := max(1, height-headerY)
+			for _, line := range qosDetailView(s, selectedQoS, width-1, visibleRows, qosDetailScroll, colorBars) {
+				if colorBars {
+					fmt.Fprint(&b, fitANSI(line, width-1), "\r\n")
+				} else {
+					fmt.Fprint(&b, fit(line, width-1), "\r\n")
+				}
 			}
 		} else {
 			visibleRows := max(1, height-headerY)
@@ -1221,8 +1370,16 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 			}
 		}
 		footer := "Tab/Shift-Tab views  ↑ header/rows  ←/→ header columns  Enter sort  → user jobs  q quit"
-		if pane == "user" {
+		if pane == "account" {
+			footer = "Tab/Shift-Tab views  ↑ header/rows  ←/→ header columns  Enter sort  → account jobs  q quit"
+		} else if pane == "qos" {
+			footer = "Tab/Shift-Tab views  ↑ header/rows  ←/→ header columns  Enter sort  → qos details  q quit"
+		} else if pane == "user" {
 			footer = "Jobs: " + user + "  Tab/Shift-Tab views  ←/→ scroll table (← users at left edge)  Esc users  q quit"
+		} else if pane == "account-jobs" {
+			footer = "Jobs: " + account + "  Tab/Shift-Tab views  ←/→ scroll table (← accounts at left edge)  Esc accounts  q quit"
+		} else if pane == "qos-details" {
+			footer = "QoS: " + selectedQoS + "  Tab/Shift-Tab views  ↑/↓ scroll  Esc qos  q quit"
 		} else if pane == "gpu" && nodeDetailsOpen {
 			footer = "Node details  ↑/↓ scroll  Esc node grid  q quit"
 		} else if pane == "gpu" {
@@ -1247,19 +1404,45 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				return err
 			}
 		case ev := <-events:
-			tablePane := pane == "cluster" || pane == "user"
+			tablePane := pane == "cluster" || pane == "user" || pane == "account" || pane == "account-jobs" || pane == "qos"
 			switch ev.key {
 			case "q", "Q", "\x03":
 				return nil
 			case "\t", "shift-tab":
+				if pane == "cluster" {
+					userSelected, userScroll = selected, scroll
+				} else if pane == "account" {
+					accountSelected, accountScroll = selected, scroll
+				} else if pane == "qos" {
+					qosSelected, qosScroll = selected, scroll
+				}
 				pane = cycleTopPane(pane, ev.key == "shift-tab")
+				if pane == "account" && (by == "user" || by == "qos") {
+					by = "account"
+				} else if pane == "cluster" && (by == "account" || by == "qos") {
+					by = "user"
+				} else if pane == "qos" && (by == "user" || by == "account") {
+					by = "qos"
+				}
+				if pane == "cluster" {
+					selected, scroll = userSelected, userScroll
+				} else if pane == "account" {
+					selected, scroll = accountSelected, accountScroll
+				} else if pane == "qos" {
+					selected, scroll = qosSelected, qosScroll
+				} else {
+					selected, scroll = 0, 0
+				}
 				headerFocused, headerActivated = false, false
 				nodeDetailsOpen, nodeScroll = false, 0
+				qosDetailScroll = 0
 			case "n", " ":
 				if pane == "gpu" && nodeDetailsOpen {
 					detailScroll += 5
 				} else if pane == "gpu" {
 					nodeScroll += 5
+				} else if pane == "qos-details" {
+					qosDetailScroll += 5
 				} else {
 					continue
 				}
@@ -1268,10 +1451,16 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					detailScroll = max(0, detailScroll-5)
 				} else if pane == "gpu" {
 					nodeScroll = max(0, nodeScroll-5)
+				} else if pane == "qos-details" {
+					qosDetailScroll = max(0, qosDetailScroll-5)
 				} else {
 					continue
 				}
 			case "down", "j":
+				if pane == "qos-details" {
+					qosDetailScroll++
+					break
+				}
 				if !tablePane {
 					if pane == "gpu" && nodeDetailsOpen {
 						detailScroll++
@@ -1280,7 +1469,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					}
 					break
 				}
-				if ev.key == "j" && pane == "cluster" && !headerFocused {
+				if ev.key == "j" && (pane == "cluster" || pane == "account" || pane == "qos") && !headerFocused {
 					by = "jobs"
 					asc = false
 					selected = 0
@@ -1292,6 +1481,10 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					selected++
 				}
 			case "up", "k":
+				if pane == "qos-details" {
+					qosDetailScroll = max(0, qosDetailScroll-1)
+					break
+				}
 				if !tablePane {
 					if pane == "gpu" && nodeDetailsOpen {
 						detailScroll = max(0, detailScroll-1)
@@ -1309,6 +1502,9 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					selected--
 				}
 			case "right":
+				if pane == "qos-details" {
+					continue
+				}
 				if !tablePane {
 					if pane == "gpu" && !nodeDetailsOpen {
 						columns := gridColumns(width - 1)
@@ -1328,10 +1524,22 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					user, pane = ids[selected], "user"
 					by, asc = "elapsed", false
 					selected, scroll, hScroll = 0, 0, 0
-				} else if pane == "user" {
+				} else if pane == "account" && selected < len(ids) {
+					accountSummaryBy, accountSummaryAsc = by, asc
+					account, pane = ids[selected], "account-jobs"
+					by, asc = "elapsed", false
+					selected, scroll, hScroll = 0, 0, 0
+				} else if pane == "qos" && selected < len(ids) {
+					qosSummaryBy, qosSummaryAsc = by, asc
+					selectedQoS, pane = ids[selected], "qos-details"
+					qosDetailScroll = 0
+				} else if pane == "user" || pane == "account-jobs" {
 					hScroll = min(hScroll+max(1, (width-1)/2), max(0, tableWidth-(width-1)))
 				}
 			case "\r", "\n":
+				if pane == "qos-details" {
+					continue
+				}
 				if !tablePane {
 					if pane == "gpu" && !nodeDetailsOpen && len(s.nodes) > 0 {
 						nodeDetailsOpen, detailScroll = true, 0
@@ -1354,6 +1562,15 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					user, pane = ids[selected], "user"
 					by, asc = "elapsed", false
 					selected, scroll = 0, 0
+				} else if pane == "account" && selected < len(ids) {
+					accountSummaryBy, accountSummaryAsc = by, asc
+					account, pane = ids[selected], "account-jobs"
+					by, asc = "elapsed", false
+					selected, scroll = 0, 0
+				} else if pane == "qos" && selected < len(ids) {
+					qosSummaryBy, qosSummaryAsc = by, asc
+					selectedQoS, pane = ids[selected], "qos-details"
+					qosDetailScroll = 0
 				}
 			case "escape":
 				if pane == "gpu" && nodeDetailsOpen {
@@ -1362,6 +1579,14 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					returnUser, pane = user, "cluster"
 					by, asc = summaryBy, summaryAsc
 					selected, scroll, hScroll = 0, 0, 0
+				} else if pane == "account-jobs" {
+					returnAccount, pane = account, "account"
+					by, asc = accountSummaryBy, accountSummaryAsc
+					selected, scroll, hScroll = 0, 0, 0
+				} else if pane == "qos-details" {
+					returnQoS, pane = selectedQoS, "qos"
+					by, asc = qosSummaryBy, qosSummaryAsc
+					selected, scroll = 0, 0
 				}
 			case "left":
 				if !tablePane {
@@ -1370,22 +1595,38 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 						if nodeSelected%columns > 0 {
 							nodeSelected--
 						}
+					} else if pane == "qos-details" {
+						returnQoS, pane = selectedQoS, "qos"
+						by, asc = qosSummaryBy, qosSummaryAsc
+						selected, scroll = 0, 0
 					} else {
 						continue
 					}
 				} else if headerFocused && selectedHeader > 0 {
 					selectedHeader--
 					headerActivated = false
-				} else if pane == "user" && hScroll > 0 {
+				} else if (pane == "user" || pane == "account-jobs") && hScroll > 0 {
 					hScroll = max(0, hScroll-max(1, (width-1)/2))
 				} else if pane == "user" {
 					returnUser, pane = user, "cluster"
 					by, asc = summaryBy, summaryAsc
 					selected, scroll, hScroll = 0, 0, 0
+				} else if pane == "account-jobs" {
+					returnAccount, pane = account, "account"
+					by, asc = accountSummaryBy, accountSummaryAsc
+					selected, scroll, hScroll = 0, 0, 0
 				}
-			case "g", "c", "m", "u":
-				if pane == "cluster" {
+			case "g", "c", "m", "u", "a":
+				if pane == "cluster" && ev.key != "a" {
 					by = map[string]string{"g": "gpu", "c": "cpu", "m": "mem", "u": "user"}[ev.key]
+					asc = false
+					selected, scroll = 0, 0
+				} else if pane == "account" && ev.key != "u" {
+					by = map[string]string{"g": "gpu", "c": "cpu", "m": "mem", "a": "account"}[ev.key]
+					asc = false
+					selected, scroll = 0, 0
+				} else if pane == "qos" && ev.key != "u" && ev.key != "a" {
+					by = map[string]string{"g": "gpu", "c": "cpu", "m": "mem"}[ev.key]
 					asc = false
 					selected, scroll = 0, 0
 				}
@@ -1404,9 +1645,33 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				if ev.y >= menuStartY && ev.y < menuStartY+len(viewMenu(paneMenuLabel(pane))) {
 					for _, column := range menuColumns() {
 						if ev.x >= column.start && ev.x <= column.end {
+							if pane == "cluster" {
+								userSelected, userScroll = selected, scroll
+							} else if pane == "account" {
+								accountSelected, accountScroll = selected, scroll
+							} else if pane == "qos" {
+								qosSelected, qosScroll = selected, scroll
+							}
 							pane = column.field
+							if pane == "account" && (by == "user" || by == "qos") {
+								by = "account"
+							} else if pane == "cluster" && (by == "account" || by == "qos") {
+								by = "user"
+							} else if pane == "qos" && (by == "user" || by == "account") {
+								by = "qos"
+							}
+							if pane == "cluster" {
+								selected, scroll = userSelected, userScroll
+							} else if pane == "account" {
+								selected, scroll = accountSelected, accountScroll
+							} else if pane == "qos" {
+								selected, scroll = qosSelected, qosScroll
+							} else {
+								selected, scroll = 0, 0
+							}
 							headerFocused, headerActivated = false, false
 							nodeDetailsOpen, nodeScroll = false, 0
+							qosDetailScroll = 0
 							break
 						}
 					}
@@ -1455,6 +1720,15 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 							user, pane = ids[selected], "user"
 							by, asc = "elapsed", false
 							selected, scroll, hScroll = 0, 0, 0
+						} else if pane == "account" {
+							accountSummaryBy, accountSummaryAsc = by, asc
+							account, pane = ids[selected], "account-jobs"
+							by, asc = "elapsed", false
+							selected, scroll, hScroll = 0, 0, 0
+						} else if pane == "qos" {
+							qosSummaryBy, qosSummaryAsc = by, asc
+							selectedQoS, pane = ids[selected], "qos-details"
+							qosDetailScroll = 0
 						}
 					}
 				}
@@ -1464,6 +1738,8 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					selected += ev.wheel
 				} else if ev.wheel != 0 && pane == "gpu" && nodeDetailsOpen {
 					detailScroll = max(0, detailScroll+ev.wheel)
+				} else if ev.wheel != 0 && pane == "qos-details" {
+					qosDetailScroll = max(0, qosDetailScroll+ev.wheel)
 				} else {
 					continue
 				}
@@ -1491,15 +1767,37 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 			} else {
 				s = updated
 				message = ""
-				tableUser := ""
-				if pane == "user" {
-					tableUser = user
-				}
-				_, _, next, _ := topRows(s, tableUser, by, asc)
-				for i, item := range next {
-					if item == id {
-						selected = i
-						break
+				if pane == "account" || pane == "account-jobs" {
+					tableAccount := ""
+					if pane == "account-jobs" {
+						tableAccount = account
+					}
+					_, _, next, _ := accountRows(s, tableAccount, by, asc)
+					for i, item := range next {
+						if item == id {
+							selected = i
+							break
+						}
+					}
+				} else if pane == "qos" {
+					_, _, next, _ := qosRows(s, by, asc)
+					for i, item := range next {
+						if item == id {
+							selected = i
+							break
+						}
+					}
+				} else {
+					tableUser := ""
+					if pane == "user" {
+						tableUser = user
+					}
+					_, _, next, _ := topRows(s, tableUser, by, asc)
+					for i, item := range next {
+						if item == id {
+							selected = i
+							break
+						}
 					}
 				}
 			}
