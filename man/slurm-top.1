@@ -47,6 +47,18 @@ A zero duration prints once outside the interactive UI.
 Set the timeout for each Slurm query. The default is
 .BR 10s .
 .TP
+.BR --prometheus-url " " \fIurl
+Prometheus server URL for hardware utilization telemetry.
+.TP
+.BR --prometheus-user " " \fIuser
+Prometheus HTTP basic auth username.
+.TP
+.BR --prometheus-password " " \fIpass
+Prometheus HTTP basic auth password.
+.TP
+.B --no-prometheus
+Disable Prometheus hardware utilization queries.
+.TP
 .BR -h , " " --help
 Show command help.
 .SH INTERACTIVE CONTROLS
@@ -66,13 +78,16 @@ In NODES, directional arrows select a node in the displayed grid;
 clicking a node or Enter replaces the grid with that node's scrollable details.
 The details show node state and boot time followed by ALLOCATED and UTILIZED
 boxes with GPU, GPU MEM, CPU, and memory bars. Utilization denominators match
-the allocations above. Unknown utilization numerators show as ?; memory utilization
-uses approximate OS memory consumption when FreeMem is available. Each running
-job on the node follows in a box labeled with its ID, user, and account; its
-GPU, GPU MEM, CPU, and MEM utilization values are placeholders because per-job
-telemetry is not queried. H200 and H200-MIG allocations remain separate;
-generic GPUs remain generically labeled. Escape returns to the grid, and the
-mouse wheel scrolls the details.
+the allocations above. When Prometheus telemetry is enabled, the UTILIZED box reports
+active GPU count, total GPU VRAM usage from NVIDIA DCGM, active CPU core count,
+and used host memory. Each running job on the node follows in a box labeled with
+its ID, user, and account, showing observed compute duty cycle across allocated GPUs,
+allocated GPU VRAM consumption, cgroup active CPU core usage, and cgroup host memory usage.
+If Prometheus is disabled with --no-prometheus or unconfigured, unmeasured numerators
+display as ? placeholders. Jobs with 0 GPUs allocated render 0% empty bars and 0/0 / 0/0G
+without ? placeholders. Status bars in each column have uniform length across all groups.
+H200 and H200-MIG allocations remain separate; generic GPUs remain generically labeled.
+Escape returns to the grid, and the mouse wheel scrolls the details.
 .PP
 Press Up from the first row to focus column headers. In header focus, use Left
 and Right to choose a column and Enter to sort it descending; a subsequent

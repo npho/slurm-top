@@ -22,19 +22,20 @@ type slurmTime struct {
 }
 
 type jobRecord struct {
-	ID        int       `json:"job_id"`
-	Account   string    `json:"account"`
-	QoS       string    `json:"qos"`
-	Partition string    `json:"partition"`
-	Name      string    `json:"name"`
-	Nodes     string    `json:"nodes"`
-	User      string    `json:"user_name"`
-	State     []string  `json:"job_state"`
-	StartTime slurmTime `json:"start_time"`
-	EndTime   slurmTime `json:"end_time"`
-	TimeLimit slurmTime `json:"time_limit"`
-	Alloc     string    `json:"tres_alloc_str"`
-	Requested string    `json:"tres_req_str"`
+	ID         int       `json:"job_id"`
+	Account    string    `json:"account"`
+	QoS        string    `json:"qos"`
+	Partition  string    `json:"partition"`
+	Name       string    `json:"name"`
+	Nodes      string    `json:"nodes"`
+	User       string    `json:"user_name"`
+	State      []string  `json:"job_state"`
+	StartTime  slurmTime `json:"start_time"`
+	EndTime    slurmTime `json:"end_time"`
+	TimeLimit  slurmTime `json:"time_limit"`
+	Alloc      string    `json:"tres_alloc_str"`
+	Requested  string    `json:"tres_req_str"`
+	GresDetail []string  `json:"gres_detail"`
 }
 type queueResponse struct {
 	Jobs []jobRecord `json:"jobs"`
@@ -54,6 +55,7 @@ type Job struct {
 	GPUs           int    `json:"gpus"`
 	MemoryMB       int    `json:"memory_mb"`
 	nodes          string
+	gpuIndices     []int
 }
 type Usage struct {
 	User            string `json:"user"`
@@ -274,7 +276,7 @@ func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 			u.MemoryMB += mem
 			a.MemoryMB += mem
 			gpuTypeCounts(j.Alloc, &snap.H200Allocated, &snap.MIGAllocated, &snap.OtherGPUAllocated)
-			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "RUNNING", Progress: jobProgress(j.State, j.StartTime, j.EndTime, at), Elapsed: elapsed, ElapsedMinutes: elapsedMinutes, CPUs: cpus, GPUs: gpus, MemoryMB: mem, nodes: j.Nodes})
+			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "RUNNING", Progress: jobProgress(j.State, j.StartTime, j.EndTime, at), Elapsed: elapsed, ElapsedMinutes: elapsedMinutes, CPUs: cpus, GPUs: gpus, MemoryMB: mem, nodes: j.Nodes, gpuIndices: parseGresIndices(j.GresDetail)})
 		} else {
 			u.PendingJobs++
 			a.PendingJobs++
@@ -289,7 +291,7 @@ func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 			u.PendingMemoryMB += mem
 			a.PendingMemoryMB += mem
 			elapsed, elapsedMinutes := elapsedStatus(j.State, j.StartTime, j.TimeLimit, at)
-			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "PENDING", Elapsed: elapsed, ElapsedMinutes: elapsedMinutes, CPUs: cpus, GPUs: gpus, MemoryMB: mem, nodes: j.Nodes})
+			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "PENDING", Elapsed: elapsed, ElapsedMinutes: elapsedMinutes, CPUs: cpus, GPUs: gpus, MemoryMB: mem, nodes: j.Nodes, gpuIndices: parseGresIndices(j.GresDetail)})
 		}
 	}
 	for _, u := range users {

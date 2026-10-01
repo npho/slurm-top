@@ -96,6 +96,15 @@ sign packages; add a separate signing design before claiming signed artifacts.
   `squeue --json` as scheduler metadata. Elapsed and progress displays are
   schedule-time estimates, not measured job completion.
 - Node-wide `FreeMem` must not be represented as per-user memory use.
+- Distinguish Slurm scheduler allocations from observed Prometheus telemetry.
+  Telemetry provides hardware utilization metrics (NVIDIA DCGM GPU compute duty
+  cycle, GPU VRAM, host CPU cores, cgroup memory) evaluated against
+  Slurm-allocated denominators.
+- If a job has 0 GPUs allocated, display `0/0` for GPU, `0/0G` for GPU MEM, and
+  render 0% empty bars rather than unmeasured `?` placeholders.
+- Status bars across node-detail boxes (`ALLOCATED`, `UTILIZED`, and per-job
+  groups) must use uniform lengths per column (derived from the widest bar in
+  that column) and maintain vertical column alignment.
 
 ## Git practices
 

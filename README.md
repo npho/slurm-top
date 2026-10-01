@@ -84,6 +84,10 @@ Run `./slurm-top --help` for all flags. Key options are:
 | `--timeout 10s` | Timeout for each Slurm query. |
 | `--interactive` | Require/use an alternate-screen terminal UI. |
 | `--all` | Include non-GPU nodes in node-oriented views. |
+| `--prometheus-url URL` | Prometheus server URL for hardware utilization telemetry. |
+| `--prometheus-user USER` | Prometheus HTTP basic auth username. |
+| `--prometheus-password PASS` | Prometheus HTTP basic auth password. |
+| `--no-prometheus` | Disable Prometheus hardware utilization queries. |
 
 `--format dashboard` remains accepted as a compatibility alias for `grid`.
 
@@ -104,14 +108,20 @@ current view. In `QOS`, a table displays Quality of Service allocations and pend
 clicking a node or pressing **Enter** replaces the grid with that node's
 scrollable details. The details begin with the node, state, and available boot
 time, followed by `ALLOCATED` and `UTILIZED` boxes containing GPU, `GPU MEM`,
-CPU, and memory bars. Utilization denominators match the allocations above; their
-numerators are `?` when Slurm does not provide the node-level metric. Memory
-uses approximate OS memory consumption when `FreeMem` is available. Each
-running job on the node follows in a box labeled with its ID, user, and account;
-its GPU, GPU MEM, CPU, and MEM utilization values are placeholders because
-per-job telemetry is not queried. Typed H200 and H200-MIG GPU allocations are
-shown separately; generic GPU allocations remain generically labeled. Press
-**Escape** to return to the grid; the mouse wheel scrolls the details.
+CPU, and memory bars. Utilization denominators match the allocations above.
+When Prometheus hardware telemetry is enabled, the `UTILIZED` box reports
+observed active GPU counts and compute duty cycles from NVIDIA DCGM, total GPU
+framebuffer VRAM usage, OS active CPU core count, and used host memory. Each
+running job on the node follows in a box labeled with its ID, user, and account,
+showing observed compute utilization across its allocated GPUs, allocated GPU
+VRAM consumption, cgroup active CPU core usage, and cgroup host memory usage.
+If Prometheus is unavailable or disabled with `--no-prometheus`, unmeasured
+numerators display `?` placeholders. Jobs with 0 GPUs allocated render 0% empty
+bars and 0/0 / 0/0G without `?` placeholders. All columns (GPU, GPU MEM, CPU,
+MEM) align vertically with uniform status bar lengths across groups. Typed H200
+and H200-MIG GPU allocations are shown separately; generic GPU allocations remain
+generically labeled. Press **Escape** to return to the grid; the mouse wheel
+scrolls the details.
 
 Press **Up** from the first row to focus the column header; use **Left/Right**
 to choose a column and **Enter** to sort it descending, then ascending on the

@@ -11,7 +11,7 @@ import (
 	"golang.org/x/term"
 )
 
-func runTop(out io.Writer, format, by string, interactive bool, watch, timeout time.Duration) error {
+func runTop(out io.Writer, format, by string, interactive bool, watch, timeout time.Duration, promCfg ...PrometheusConfig) error {
 	terminal := false
 	if f, ok := out.(*os.File); ok {
 		terminal = term.IsTerminal(int(f.Fd())) && os.Getenv("TERM") != "dumb"
@@ -24,7 +24,7 @@ func runTop(out io.Writer, format, by string, interactive bool, watch, timeout t
 		if interval == 0 {
 			interval = 5 * time.Second
 		}
-		return runTopUI(os.Stdin, os.Stdout, interval, timeout, by)
+		return runTopUI(os.Stdin, os.Stdout, interval, timeout, by, promCfg...)
 	}
 	root, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()

@@ -297,6 +297,10 @@ func run(args []string, out, errOut io.Writer) error {
 	flags.Bool("all", false, "Include non-GPU nodes")
 	flags.String("format", "top", "Output format: top, json, grid, detail or table")
 	flags.String("sort", "gpu", "Sort users by gpu, cpu, mem, jobs or user")
+	flags.String("prometheus-url", "https://prometheus.hyakm.washington.edu:9090", "Prometheus server URL for hardware utilization telemetry")
+	flags.String("prometheus-user", "slurm-top", "Prometheus HTTP basic auth username")
+	flags.String("prometheus-password", "password", "Prometheus HTTP basic auth password")
+	flags.Bool("no-prometheus", false, "Disable Prometheus hardware utilization queries")
 	flags.Bool("interactive", false, "Use an alternate-screen, paged terminal UI")
 	flags.Duration("watch", 0, "Refresh interval (e.g. 5s; zero prints once)")
 	flags.Duration("timeout", 10*time.Second, "Timeout for each Slurm query")
@@ -312,7 +316,7 @@ func run(args []string, out, errOut io.Writer) error {
 		return err
 	}
 	if v.GetBool("help") {
-		fmt.Fprintln(out, "Usage: slurm-top [--format top|json|grid|detail|table] [--sort gpu|cpu|mem|jobs|user] [--interactive] [--watch 5s]")
+		fmt.Fprintln(out, "Usage: slurm-top [--format top|json|grid|detail|table] [--sort gpu|cpu|mem|jobs|user] [--interactive] [--watch 5s] [--prometheus-url URL] [--no-prometheus]")
 		flags.SetOutput(out)
 		flags.PrintDefaults()
 		return nil
@@ -331,8 +335,15 @@ func run(args []string, out, errOut io.Writer) error {
 	if watch < 0 || timeout <= 0 {
 		return fmt.Errorf("--watch must be nonnegative and --timeout must be positive")
 	}
+	promCfg := PrometheusConfig{
+		URL:      v.GetString("prometheus-url"),
+		Username: v.GetString("prometheus-user"),
+		Password: v.GetString("prometheus-password"),
+		Disabled: v.GetBool("no-prometheus"),
+		Timeout:  2 * time.Second,
+	}
 	if format == "top" || format == "json" {
-		return runTop(out, format, sortBy, v.GetBool("interactive"), watch, timeout)
+		return runTop(out, format, sortBy, v.GetBool("interactive"), watch, timeout, promCfg)
 	}
 	if v.GetBool("interactive") {
 		if format == "table" {

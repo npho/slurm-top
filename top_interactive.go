@@ -4,17 +4,18 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"os/signal"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
 	"golang.org/x/term"
-	"syscall"
 )
 
 type uiEvent struct {
@@ -414,21 +415,25 @@ func highlightHeader(header string, column headerColumn) string {
 	return header[:start] + "\x1b[7m" + header[start:end] + "\x1b[27m" + header[end:]
 }
 
-// Color reflects Slurm allocation / configured capacity, not measured usage.
-func coloredBar(n, total, width int, enabled bool) string {
-	plain := percentBar(n, total, width)
-	if !enabled {
-		return plain
+// coloredBarFloat renders a progress bar scaled to pct [0..100].
+func coloredBarFloat(pct float64, width int, enabled bool) string {
+	if width <= 0 {
+		return ""
 	}
-	if total <= 0 {
-		return "\x1b[38;2;128;128;128m" + plain + "\x1b[0m"
-	}
-	p := float64(n) / float64(total)
+	p := pct / 100.0
 	if p < 0 {
 		p = 0
 	}
 	if p > 1 {
 		p = 1
+	}
+	filled := int(p*float64(width) + 0.5)
+	if filled > width {
+		filled = width
+	}
+	plain := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+	if !enabled {
+		return plain
 	}
 	red, green := 0, 200
 	if p < 0.5 {
@@ -438,6 +443,18 @@ func coloredBar(n, total, width int, enabled bool) string {
 		green = int((1-p)*2*200 + 0.5)
 	}
 	return fmt.Sprintf("\x1b[38;2;%d;%d;0m%s\x1b[0m", red, green, plain)
+}
+
+// Color reflects Slurm allocation / configured capacity, not measured usage.
+func coloredBar(n, total, width int, enabled bool) string {
+	plain := percentBar(n, total, width)
+	if !enabled {
+		return plain
+	}
+	if total <= 0 {
+		return "\x1b[38;2;128;128;128m" + plain + "\x1b[0m"
+	}
+	return coloredBarFloat(float64(n)*100.0/float64(total), width, enabled)
 }
 
 // Width-aware padding/clipping of ANSI SGR text: escape codes have zero width.
@@ -760,19 +777,39 @@ type nodeBarContent struct {
 	heading, status, info, unavailable string
 }
 
-func nodeResourceContent(label string, used, usable, total int, usedText, usableText, unavailableText, totalText string, color bool) nodeBarContent {
+func nodeResourceContent(label string, used, usable, total int, usedText, usableText, unavailableText, totalText string, color bool, minWidth ...int) nodeBarContent {
 	info, unavailable := usagePair(
 		usageValueFor(used, usable, usedText, usableText, true),
 		usageValueFor(total-usable, total, unavailableText, totalText, false))
 	barWidth := max(visibleWidth(info), visibleWidth(unavailable))
+	minW := 0
+	if len(minWidth) > 0 {
+		minW = minWidth[0]
+	}
+	labelWidth := visibleWidth(label)
+	if minW > labelWidth+barWidth {
+		barWidth = minW - labelWidth
+	}
 	barTotal := usable
 	if used == 0 && usable == 0 {
 		barTotal = 1 // A zero allocation is known empty, not an unknown bar.
 	}
+	padLine := func(line string) string {
+		if barWidth > visibleWidth(line) {
+			pad := barWidth - visibleWidth(line)
+			if idx := strings.Index(line, "  "); idx >= 0 {
+				return line[:idx+2] + strings.Repeat(" ", pad) + line[idx+2:]
+			}
+			return strings.Repeat(" ", pad) + line
+		}
+		return line
+	}
+	info = padLine(info)
+	unavailable = padLine(unavailable)
 	return nodeBarContent{
 		status:      label + coloredBar(used, barTotal, barWidth, color),
-		info:        strings.Repeat(" ", visibleWidth(label)) + info,
-		unavailable: strings.Repeat(" ", visibleWidth(label)) + unavailable,
+		info:        strings.Repeat(" ", labelWidth) + info,
+		unavailable: strings.Repeat(" ", labelWidth) + unavailable,
 	}
 }
 
@@ -814,11 +851,19 @@ func nodeGPUStatuses(n Node, available bool) []nodeGPUStatus {
 	return statuses
 }
 
-func nodeGPUContent(n Node, available, color bool) nodeBarContent {
+func nodeGPUContent(n Node, available, color bool, minWidth ...int) nodeBarContent {
+	minW := 0
+	if len(minWidth) > 0 {
+		minW = minWidth[0]
+	}
 	statuses := nodeGPUStatuses(n, available)
 	parts := make([]nodeBarContent, 0, len(statuses))
 	for _, status := range statuses {
-		parts = append(parts, nodeResourceContent(status.label, status.used, status.usable, status.all, strconv.Itoa(status.used), strconv.Itoa(status.usable), strconv.Itoa(status.all-status.usable), strconv.Itoa(status.all), color))
+		statusOpt := 0
+		if len(statuses) == 1 {
+			statusOpt = minW
+		}
+		parts = append(parts, nodeResourceContent(status.label, status.used, status.usable, status.all, strconv.Itoa(status.used), strconv.Itoa(status.usable), strconv.Itoa(status.all-status.usable), strconv.Itoa(status.all), color, statusOpt))
 	}
 	content := nodeBarContent{heading: "GPU"}
 	for i, part := range parts {
@@ -879,59 +924,233 @@ func widenStatBox(lines []string, width int) []string {
 	return widened
 }
 
-func nodeStatusContents(n Node, available, color bool) []nodeBarContent {
+func nodeStatusContents(n Node, available, color bool, colWidths ...[4]int) []nodeBarContent {
 	cpuUsable, memUsable := n.CPUTotal, n.MemoryTotalMB
 	cpuUsed, memUsed := n.CPUAllocated, n.MemoryAllocatedMB
 	if !available {
 		cpuUsable, memUsable, cpuUsed, memUsed = 0, 0, 0, 0
 	}
 	contents := []nodeBarContent{}
-	if n.GPUTotal > 0 {
-		contents = append(contents, nodeGPUContent(n, available, color))
+	var cw [4]int
+	useWidths := false
+	if len(colWidths) > 0 {
+		cw = colWidths[0]
+		useWidths = true
 	}
-	cpu := nodeResourceContent("", cpuUsed, cpuUsable, n.CPUTotal, strconv.Itoa(cpuUsed), strconv.Itoa(cpuUsable), strconv.Itoa(n.CPUTotal-cpuUsable), strconv.Itoa(n.CPUTotal), color)
+
+	if n.GPUTotal > 0 {
+		gpuOpt := 0
+		if useWidths {
+			gpuOpt = cw[0]
+		}
+		gpu := nodeGPUContent(n, available, color, gpuOpt)
+		if useWidths && cw[0] > visibleWidth(gpu.status) {
+			pad := cw[0] - visibleWidth(gpu.status)
+			gpu.status += strings.Repeat(" ", pad)
+			gpu.info += strings.Repeat(" ", pad)
+			gpu.unavailable += strings.Repeat(" ", pad)
+		}
+		contents = append(contents, gpu)
+
+		if useWidths && cw[1] > 0 {
+			gap := nodeBarContent{
+				heading:     strings.Repeat(" ", cw[1]),
+				status:      strings.Repeat(" ", cw[1]),
+				info:        strings.Repeat(" ", cw[1]),
+				unavailable: strings.Repeat(" ", cw[1]),
+			}
+			contents = append(contents, gap)
+		}
+	}
+	cpuOpt := 0
+	if useWidths {
+		cpuOpt = cw[2]
+	}
+	cpu := nodeResourceContent("", cpuUsed, cpuUsable, n.CPUTotal, strconv.Itoa(cpuUsed), strconv.Itoa(cpuUsable), strconv.Itoa(n.CPUTotal-cpuUsable), strconv.Itoa(n.CPUTotal), color, cpuOpt)
 	cpu.heading = "CPU"
-	mem := nodeResourceContent("", memUsed, memUsable, n.MemoryTotalMB, gb(memUsed), gb(memUsable)+"G", gb(n.MemoryTotalMB-memUsable), gb(n.MemoryTotalMB)+"G", color)
+	if useWidths && cw[2] > visibleWidth(cpu.status) {
+		pad := cw[2] - visibleWidth(cpu.status)
+		cpu.status = strings.Repeat(" ", pad) + cpu.status
+		cpu.info = strings.Repeat(" ", pad) + cpu.info
+		cpu.unavailable = strings.Repeat(" ", pad) + cpu.unavailable
+	}
+
+	memOpt := 0
+	if useWidths {
+		memOpt = cw[3]
+	}
+	mem := nodeResourceContent("", memUsed, memUsable, n.MemoryTotalMB, gb(memUsed), gb(memUsable)+"G", gb(n.MemoryTotalMB-memUsable), gb(n.MemoryTotalMB)+"G", color, memOpt)
 	mem.heading = "MEM"
+	if useWidths && cw[3] > visibleWidth(mem.status) {
+		pad := cw[3] - visibleWidth(mem.status)
+		mem.status = strings.Repeat(" ", pad) + mem.status
+		mem.info = strings.Repeat(" ", pad) + mem.info
+		mem.unavailable = strings.Repeat(" ", pad) + mem.unavailable
+	}
+
 	return append(contents, cpu, mem)
 }
 
 // nodeStatusBars mirrors the cluster summary for one node inside one
 // allocation box. The final row is capacity unavailable for scheduling.
-func nodeStatusBars(n Node, _ int, color bool) []string {
-	return nodeBarBox("ALLOCATED", nodeStatusContents(n, !unavailable(n.State), color))
+func nodeStatusBars(n Node, _ int, color bool, colWidths ...[4]int) []string {
+	return nodeBarBox("ALLOCATED", nodeStatusContents(n, !unavailable(n.State), color, colWidths...))
 }
 
-func nodeUtilizationResourceContent(label string, used *int, total int, totalText string, color bool) nodeBarContent {
-	if total == 0 {
-		info := "0%  0/" + totalText
-		bar := coloredBar(0, 1, visibleWidth(info), color)
-		return nodeBarContent{status: label + bar, info: strings.Repeat(" ", visibleWidth(label)) + info, unavailable: strings.Repeat(" ", visibleWidth(label)+visibleWidth(info))}
+func nodeUtilizationResourceContent(label string, used *int, total int, totalText string, color bool, opts ...any) nodeBarContent {
+	minWidth := 0
+	var customPct *float64
+	for _, opt := range opts {
+		switch v := opt.(type) {
+		case int:
+			minWidth = v
+		case float64:
+			customPct = &v
+		case *float64:
+			customPct = v
+		}
 	}
+	labelWidth := visibleWidth(label)
+
+	if total == 0 {
+		var pctStr string
+		if minWidth > 0 {
+			pctStr = "  0%"
+		} else {
+			pctStr = "0%"
+		}
+		fraction := "0/" + totalText
+		info := pctStr + "  " + fraction
+		barWidth := visibleWidth(info)
+		if minWidth > labelWidth+barWidth {
+			barWidth = minWidth - labelWidth
+		}
+		var bar string
+		if customPct != nil {
+			bar = coloredBarFloat(*customPct, barWidth, color)
+		} else {
+			bar = coloredBar(0, 1, barWidth, color)
+		}
+		if barWidth > visibleWidth(info) {
+			if minWidth > 0 {
+				pad := barWidth - visibleWidth(info)
+				info = pctStr + "  " + strings.Repeat(" ", pad) + fraction
+			} else {
+				info = strings.Repeat(" ", barWidth-visibleWidth(info)) + info
+			}
+		}
+		return nodeBarContent{
+			status:      label + bar,
+			info:        strings.Repeat(" ", labelWidth) + info,
+			unavailable: strings.Repeat(" ", labelWidth+barWidth),
+		}
+	}
+
 	if used == nil {
+		totalDigits := visibleWidth(strings.TrimSuffix(strings.TrimSuffix(totalText, " GB"), "G"))
+		usedPlaceholder := "?"
+		if totalDigits > 1 && minWidth > 0 {
+			usedPlaceholder = strings.Repeat(" ", totalDigits-1) + "?"
+		}
 		info := "?  ?/" + totalText
-		bar := strings.Repeat("?", visibleWidth(info))
+		if minWidth > 0 {
+			info = "   ?  " + usedPlaceholder + "/" + totalText
+		}
+		barWidth := visibleWidth(info)
+		if minWidth > labelWidth+barWidth {
+			barWidth = minWidth - labelWidth
+		}
+		bar := strings.Repeat("?", barWidth)
 		if color {
 			bar = "\x1b[38;2;128;128;128m" + bar + "\x1b[0m"
 		}
-		return nodeBarContent{status: label + bar, info: strings.Repeat(" ", visibleWidth(label)) + info, unavailable: strings.Repeat(" ", visibleWidth(label)+visibleWidth(info))}
+		if barWidth > visibleWidth(info) {
+			info = strings.Repeat(" ", barWidth-visibleWidth(info)) + info
+		}
+		return nodeBarContent{
+			status:      label + bar,
+			info:        strings.Repeat(" ", labelWidth) + info,
+			unavailable: strings.Repeat(" ", labelWidth+barWidth),
+		}
 	}
-	info := usageValueFor(*used, total, strconv.Itoa(*used), totalText, true)
+
+	pct := float64(*used) * 100.0 / float64(total)
+	if customPct != nil {
+		pct = *customPct
+	}
+	var pctStr string
+	if minWidth > 0 {
+		pctStr = fmt.Sprintf("%3.0f%%", pct)
+	} else {
+		pctStr = fmt.Sprintf("%.0f%%", pct)
+	}
+
+	var usedNumStr string
 	if strings.HasSuffix(totalText, "G") || strings.HasSuffix(totalText, " GB") {
-		info = usageValueFor(*used, total, gb(*used), totalText, true)
+		usedNumStr = gb(*used)
+	} else {
+		usedNumStr = strconv.Itoa(*used)
 	}
-	text, _ := usagePair(info, usageValue{})
-	barWidth := visibleWidth(text)
-	return nodeBarContent{status: label + coloredBar(*used, total, barWidth, color), info: strings.Repeat(" ", visibleWidth(label)) + text, unavailable: strings.Repeat(" ", visibleWidth(label)+barWidth)}
+	totalDigits := visibleWidth(strings.TrimSuffix(strings.TrimSuffix(totalText, " GB"), "G"))
+	usedStr := usedNumStr
+	if minWidth > 0 && totalDigits > visibleWidth(usedStr) {
+		usedStr = strings.Repeat(" ", totalDigits-visibleWidth(usedStr)) + usedStr
+	}
+	fraction := usedStr + "/" + totalText
+	info := pctStr + "  " + fraction
+	barWidth := visibleWidth(info)
+	if minWidth > labelWidth+barWidth {
+		barWidth = minWidth - labelWidth
+	}
+	var statusBar string
+	if customPct != nil {
+		statusBar = coloredBarFloat(*customPct, barWidth, color)
+	} else {
+		statusBar = coloredBar(*used, total, barWidth, color)
+	}
+	if barWidth > visibleWidth(info) {
+		info = strings.Repeat(" ", barWidth-visibleWidth(info)) + info
+	}
+	return nodeBarContent{
+		status:      label + statusBar,
+		info:        strings.Repeat(" ", labelWidth) + info,
+		unavailable: strings.Repeat(" ", labelWidth+barWidth),
+	}
 }
 
-func nodeUtilizationBars(n Node, _ int, color bool) []string {
+func nodeUtilizationBars(n Node, _ int, color bool, args ...any) []string {
+	var t *NodeTelemetry
+	var colWidths [4]int
+	useWidths := false
+	for _, arg := range args {
+		switch v := arg.(type) {
+		case *NodeTelemetry:
+			t = v
+		case [4]int:
+			colWidths = v
+			useWidths = true
+		case []int:
+			copy(colWidths[:], v)
+			useWidths = true
+		}
+	}
 	available := !unavailable(n.State)
 	contents := []nodeBarContent{}
 	if n.GPUTotal > 0 {
 		gpu := nodeBarContent{heading: "GPU"}
-		for i, status := range nodeGPUStatuses(n, available) {
-			part := nodeUtilizationResourceContent(status.label, nil, status.used, strconv.Itoa(status.used), color)
+		statuses := nodeGPUStatuses(n, available)
+		for i, status := range statuses {
+			var used *int
+			if t != nil && available && status.used > 0 {
+				active := t.ActiveGPUCount()
+				activeClamped := min(active, status.used)
+				used = &activeClamped
+			}
+			gpuOpt := 0
+			if useWidths && len(statuses) == 1 {
+				gpuOpt = colWidths[0]
+			}
+			part := nodeUtilizationResourceContent(status.label, used, status.used, strconv.Itoa(status.used), color, gpuOpt)
 			if i > 0 {
 				gpu.status += "  "
 				gpu.info += "  "
@@ -940,6 +1159,12 @@ func nodeUtilizationBars(n Node, _ int, color bool) []string {
 			gpu.status += part.status
 			gpu.info += part.info
 			gpu.unavailable += part.unavailable
+		}
+		if useWidths && colWidths[0] > visibleWidth(gpu.status) {
+			pad := colWidths[0] - visibleWidth(gpu.status)
+			gpu.status += strings.Repeat(" ", pad)
+			gpu.info += strings.Repeat(" ", pad)
+			gpu.unavailable += strings.Repeat(" ", pad)
 		}
 		contents = append(contents, gpu)
 	}
@@ -951,27 +1176,247 @@ func nodeUtilizationBars(n Node, _ int, color bool) []string {
 		cpuTotal, memoryTotal, memoryUsed = 0, 0, nil
 	}
 	if n.GPUTotal > 0 {
-		gpuMemory := nodeUtilizationResourceContent("", memoryUsed, memoryTotal, gb(memoryTotal)+"G", color)
+		gpuMemTotal := memoryTotal
+		gpuMemUsed := memoryUsed
+		if t != nil && available {
+			tot := t.TotalGPUMemMB()
+			if tot > 0 {
+				gpuMemTotal = tot
+				u := t.TotalGPUMemUsedMB()
+				gpuMemUsed = &u
+			}
+		}
+		gpuMemOpt := 0
+		if useWidths {
+			gpuMemOpt = colWidths[1]
+		}
+		gpuMemory := nodeUtilizationResourceContent("", gpuMemUsed, gpuMemTotal, gb(gpuMemTotal)+"G", color, gpuMemOpt)
 		gpuMemory.heading = "GPU MEM"
 		contents = append(contents, gpuMemory)
 	}
-	cpu := nodeUtilizationResourceContent("", nil, cpuTotal, strconv.Itoa(cpuTotal), color)
+	var cpuUsed *int
+	if t != nil && available && t.NodeCPUActiveCores != nil {
+		c := int(math.Round(*t.NodeCPUActiveCores))
+		cpuUsed = &c
+	}
+	cpuOpt := 0
+	if useWidths {
+		cpuOpt = colWidths[2]
+	}
+	cpu := nodeUtilizationResourceContent("", cpuUsed, cpuTotal, strconv.Itoa(cpuTotal), color, cpuOpt)
 	cpu.heading = "CPU"
-	mem := nodeUtilizationResourceContent("", memoryUsed, memoryTotal, gb(memoryTotal)+"G", color)
+
+	if t != nil && available && t.NodeMemUsedMB != nil {
+		memoryUsed = t.NodeMemUsedMB
+	}
+	memOpt := 0
+	if useWidths {
+		memOpt = colWidths[3]
+	}
+	mem := nodeUtilizationResourceContent("", memoryUsed, memoryTotal, gb(memoryTotal)+"G", color, memOpt)
 	mem.heading = "MEM"
 	return nodeBarBox("UTILIZED", append(contents, cpu, mem))
 }
 
-// nodeJobUtilizationBars renders per-job utilization placeholders. Slurm job
-// records provide allocations, not per-job GPU, CPU, or memory telemetry.
-func nodeJobUtilizationBars(job Job, color bool) []string {
-	gpu := nodeUtilizationResourceContent("", nil, job.GPUs, strconv.Itoa(job.GPUs), color)
+func jobColNaturalWidths(job Job, t *NodeTelemetry) [4]int {
+	gpuTot := strconv.Itoa(job.GPUs)
+	w0 := 4 + 2 + len(gpuTot) + 1 + len(gpuTot)
+	if w0 < 9 {
+		w0 = 9
+	}
+
+	gpuMemTotal := job.MemoryMB
+	if job.GPUs == 0 {
+		gpuMemTotal = 0
+	} else if t != nil && job.GPUs > 0 {
+		sumMemTotal := 0
+		indices := job.gpuIndices
+		if len(indices) == 0 {
+			for i := 0; i < job.GPUs; i++ {
+				indices = append(indices, i)
+			}
+		}
+		for _, idx := range indices {
+			tot := t.GPUMemTotalMB[idx]
+			if tot > 0 {
+				sumMemTotal += tot
+			} else {
+				sumMemTotal += 141 * 1024
+			}
+		}
+		if sumMemTotal > 0 {
+			gpuMemTotal = sumMemTotal
+		}
+	}
+	totGpuMemStr := gb(gpuMemTotal) + "G"
+	digitsGpuMem := visibleWidth(strings.TrimSuffix(totGpuMemStr, "G"))
+	w1 := 4 + 2 + digitsGpuMem + 1 + visibleWidth(totGpuMemStr)
+	if w1 < 14 {
+		w1 = 14
+	}
+
+	cpuTotStr := strconv.Itoa(job.CPUs)
+	w2 := 4 + 2 + len(cpuTotStr) + 1 + len(cpuTotStr)
+	if w2 < 11 {
+		w2 = 11
+	}
+
+	memTotStr := gb(job.MemoryMB) + "G"
+	digitsMem := visibleWidth(strings.TrimSuffix(memTotStr, "G"))
+	w3 := 4 + 2 + digitsMem + 1 + visibleWidth(memTotStr)
+	if w3 < 14 {
+		w3 = 14
+	}
+
+	return [4]int{w0, w1, w2, w3}
+}
+
+// nodeJobUtilizationBars renders per-job utilization placeholders or observed
+// Prometheus telemetry when available.
+func nodeJobUtilizationBars(job Job, color bool, args ...any) []string {
+	var t *NodeTelemetry
+	colWidths := [4]int{9, 14, 11, 14}
+	hasColWidths := false
+	var n Node
+	hasNode := false
+	for _, arg := range args {
+		switch v := arg.(type) {
+		case Node:
+			n = v
+			hasNode = true
+		case *Node:
+			if v != nil {
+				n = *v
+				hasNode = true
+			}
+		case *NodeTelemetry:
+			t = v
+		case [4]int:
+			colWidths = v
+			hasColWidths = true
+		case []int:
+			copy(colWidths[:], v)
+			hasColWidths = true
+		}
+	}
+	if !hasColWidths {
+		natural := jobColNaturalWidths(job, t)
+		for k := 0; k < 4; k++ {
+			colWidths[k] = max(colWidths[k], natural[k])
+		}
+	}
+
+	var gpuUsed *int
+	var customGpuPct *float64
+	gpuMemTotal := job.MemoryMB
+	var gpuMemUsed *int
+
+	if job.GPUs == 0 {
+		zero := 0
+		gpuUsed = &zero
+		gpuMemUsed = &zero
+		gpuMemTotal = 0
+		zeroPct := 0.0
+		customGpuPct = &zeroPct
+	} else if t != nil && job.GPUs > 0 {
+		indices := job.gpuIndices
+		if len(indices) == 0 {
+			for i := 0; i < job.GPUs; i++ {
+				indices = append(indices, i)
+			}
+		}
+		sumUtil := 0.0
+		sumMemUsed := 0
+		sumMemTotal := 0
+		hasAnyUtil := false
+		for _, idx := range indices {
+			u, hasU := t.GPUUtils[idx]
+			m, hasM := t.GPUMemUsedMB[idx]
+			tot := t.GPUMemTotalMB[idx]
+			if hasU {
+				sumUtil += u
+				hasAnyUtil = true
+			}
+			if hasM {
+				sumMemUsed += m
+			}
+			if tot > 0 {
+				sumMemTotal += tot
+			} else {
+				sumMemTotal += 141 * 1024
+			}
+		}
+		if hasAnyUtil {
+			usedEq := int(math.Ceil(sumUtil / 100.0))
+			if usedEq < 0 {
+				usedEq = 0
+			}
+			if usedEq > job.GPUs {
+				usedEq = job.GPUs
+			}
+			gpuUsed = &usedEq
+			pct := sumUtil / float64(job.GPUs)
+			customGpuPct = &pct
+		}
+		if sumMemTotal > 0 {
+			gpuMemTotal = sumMemTotal
+			gpuMemUsed = &sumMemUsed
+		}
+	}
+
+	gpuLabelWidth := 0
+	if hasNode && n.GPUTotal > 0 {
+		statuses := nodeGPUStatuses(n, true)
+		if len(statuses) > 0 {
+			gpuLabelWidth = visibleWidth(statuses[0].label)
+		}
+	}
+	targetGpuBar := colWidths[0] - gpuLabelWidth
+	if targetGpuBar < 9 {
+		targetGpuBar = 9
+	}
+	gpu := nodeUtilizationResourceContent("", gpuUsed, job.GPUs, strconv.Itoa(job.GPUs), color, targetGpuBar, customGpuPct)
 	gpu.heading = "GPU"
-	gpuMemory := nodeUtilizationResourceContent("", nil, job.MemoryMB, gb(job.MemoryMB)+"G", color)
+	if gpuLabelWidth > 0 {
+		gpu.status = strings.Repeat(" ", gpuLabelWidth) + gpu.status
+		gpu.info = strings.Repeat(" ", gpuLabelWidth) + gpu.info
+		gpu.unavailable = strings.Repeat(" ", gpuLabelWidth) + gpu.unavailable
+	}
+	if colWidths[0] > visibleWidth(gpu.status) {
+		leftPad := colWidths[0] - visibleWidth(gpu.status)
+		gpu.status = strings.Repeat(" ", leftPad) + gpu.status
+		gpu.info = strings.Repeat(" ", leftPad) + gpu.info
+		gpu.unavailable = strings.Repeat(" ", leftPad) + gpu.unavailable
+	}
+
+	gpuMemory := nodeUtilizationResourceContent("", gpuMemUsed, gpuMemTotal, gb(gpuMemTotal)+"G", color, colWidths[1])
 	gpuMemory.heading = "GPU MEM"
-	cpu := nodeUtilizationResourceContent("", nil, job.CPUs, strconv.Itoa(job.CPUs), color)
+
+	var cpuUsed *int
+	if t != nil {
+		if c, ok := t.JobCPUCores[job.ID]; ok {
+			cu := int(math.Ceil(c))
+			if cu < 0 {
+				cu = 0
+			}
+			if job.CPUs > 0 && cu > job.CPUs {
+				cu = job.CPUs
+			}
+			cpuUsed = &cu
+		}
+	}
+	cpu := nodeUtilizationResourceContent("", cpuUsed, job.CPUs, strconv.Itoa(job.CPUs), color, colWidths[2])
 	cpu.heading = "CPU"
-	mem := nodeUtilizationResourceContent("", nil, job.MemoryMB, gb(job.MemoryMB)+"G", color)
+
+	var memUsed *int
+	if t != nil {
+		if m, ok := t.JobMemUsedMB[job.ID]; ok {
+			memUsed = &m
+		} else if m, ok := t.JobMemRSSMB[job.ID]; ok {
+			memUsed = &m
+		}
+	}
+	mem := nodeUtilizationResourceContent("", memUsed, job.MemoryMB, gb(job.MemoryMB)+"G", color, colWidths[3])
 	mem.heading = "MEM"
 	label := fmt.Sprintf("%d • %s • %s", job.ID, printable(job.User), printable(job.Account))
 	return nodeBarBox(label, []nodeBarContent{gpu, gpuMemory, cpu, mem})
@@ -985,25 +1430,118 @@ func nodeDetailsTitle(n Node) string {
 	return title
 }
 
+func nodeGroupColumnWidths(n Node, runningJobs []Job, t *NodeTelemetry, color bool) [4]int {
+	colWidths := [4]int{9, 14, 11, 14}
+	available := !unavailable(n.State)
+
+	gpuLabelWidth := 0
+	if n.GPUTotal > 0 {
+		statuses := nodeGPUStatuses(n, available)
+		if len(statuses) > 0 {
+			gpuLabelWidth = visibleWidth(statuses[0].label)
+		}
+		allocGPU := nodeGPUContent(n, available, color)
+		maxGpuBar := visibleWidth(allocGPU.status) - gpuLabelWidth
+
+		utilGpuWidth := 0
+		for i, status := range statuses {
+			var used *int
+			if t != nil && available && status.used > 0 {
+				active := min(t.ActiveGPUCount(), status.used)
+				used = &active
+			}
+			part := nodeUtilizationResourceContent(status.label, used, status.used, strconv.Itoa(status.used), color)
+			if i > 0 {
+				utilGpuWidth += 2
+			}
+			utilGpuWidth += visibleWidth(part.status)
+		}
+		maxGpuBar = max(maxGpuBar, utilGpuWidth-gpuLabelWidth)
+		if maxGpuBar < 9 {
+			maxGpuBar = 9
+		}
+		colWidths[0] = max(colWidths[0], gpuLabelWidth+maxGpuBar)
+
+		gpuMemTotal := n.MemoryAllocatedMB
+		var gpuMemUsed *int
+		if t != nil && available {
+			if tot := t.TotalGPUMemMB(); tot > 0 {
+				gpuMemTotal = tot
+				u := t.TotalGPUMemUsedMB()
+				gpuMemUsed = &u
+			}
+		}
+		gpuMem := nodeUtilizationResourceContent("", gpuMemUsed, gpuMemTotal, gb(gpuMemTotal)+"G", color, 1)
+		colWidths[1] = max(colWidths[1], visibleWidth(gpuMem.status))
+	}
+
+	cpuUsable, memUsable := n.CPUTotal, n.MemoryTotalMB
+	cpuUsed, memUsed := n.CPUAllocated, n.MemoryAllocatedMB
+	if !available {
+		cpuUsable, memUsable, cpuUsed, memUsed = 0, 0, 0, 0
+	}
+	allocCPU := nodeResourceContent("", cpuUsed, cpuUsable, n.CPUTotal, strconv.Itoa(cpuUsed), strconv.Itoa(cpuUsable), strconv.Itoa(n.CPUTotal-cpuUsable), strconv.Itoa(n.CPUTotal), color)
+	colWidths[2] = max(colWidths[2], visibleWidth(allocCPU.status))
+
+	allocMEM := nodeResourceContent("", memUsed, memUsable, n.MemoryTotalMB, gb(memUsed), gb(memUsable)+"G", gb(n.MemoryTotalMB-memUsable), gb(n.MemoryTotalMB)+"G", color)
+	colWidths[3] = max(colWidths[3], visibleWidth(allocMEM.status))
+
+	cpuTotal, memoryTotal := n.CPUAllocated, n.MemoryAllocatedMB
+	var cpuUsedTelem *int
+	if t != nil && available && t.NodeCPUActiveCores != nil {
+		c := int(math.Round(*t.NodeCPUActiveCores))
+		cpuUsedTelem = &c
+	}
+	utilCPU := nodeUtilizationResourceContent("", cpuUsedTelem, cpuTotal, strconv.Itoa(cpuTotal), color, 1)
+	colWidths[2] = max(colWidths[2], visibleWidth(utilCPU.status))
+
+	var memUsedTelem *int
+	if t != nil && available && t.NodeMemUsedMB != nil {
+		memUsedTelem = t.NodeMemUsedMB
+	}
+	utilMEM := nodeUtilizationResourceContent("", memUsedTelem, memoryTotal, gb(memoryTotal)+"G", color, 1)
+	colWidths[3] = max(colWidths[3], visibleWidth(utilMEM.status))
+
+	for _, job := range runningJobs {
+		jw := jobColNaturalWidths(job, t)
+		colWidths[0] = max(colWidths[0], gpuLabelWidth+jw[0])
+		for k := 1; k < 4; k++ {
+			colWidths[k] = max(colWidths[k], jw[k])
+		}
+	}
+
+	return colWidths
+}
+
 // nodeDetails renders a selected GPU node in the current pane rather than as
 // an overlay. Its output always occupies the available pane height.
-func nodeDetails(n Node, jobs []Job, width, height, scroll int, color bool) []string {
+func nodeDetails(n Node, jobs []Job, width, height, scroll int, color bool, telem ...*NodeTelemetry) []string {
+	var t *NodeTelemetry
+	if len(telem) > 0 {
+		t = telem[0]
+	}
 	width, height = max(1, width), max(1, height)
 	title := nodeDetailsTitle(n)
 	wrapped := []string{title}
 	if visibleWidth(title) > width {
 		wrapped = wrapPaneText(title, width)
 	}
-	// Leave one cell for the scroll indicator so it never overwrites a box border.
-	groups := [][]string{
-		nodeStatusBars(n, max(1, width-1), color),
-		nodeUtilizationBars(n, max(1, width-1), color),
-	}
+	var runningJobs []Job
 	for _, job := range jobs {
 		if job.State == "RUNNING" && jobRunsOnNode(job.nodes, n.Name) {
-			groups = append(groups, nodeJobUtilizationBars(job, color))
+			runningJobs = append(runningJobs, job)
 		}
 	}
+	colWidths := nodeGroupColumnWidths(n, runningJobs, t, color)
+	// Leave one cell for the scroll indicator so it never overwrites a box border.
+	groups := [][]string{
+		nodeStatusBars(n, max(1, width-1), color, colWidths),
+		nodeUtilizationBars(n, max(1, width-1), color, t, colWidths),
+	}
+	for _, job := range runningJobs {
+		groups = append(groups, nodeJobUtilizationBars(job, color, n, t, colWidths))
+	}
+
 	boxWidth := 0
 	for _, group := range groups {
 		for _, line := range group {
@@ -1120,7 +1658,11 @@ func accountJobStats(s Snapshot, account string) (users, running, pending int) {
 	return len(seen), running, pending
 }
 
-func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort string) error {
+func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort string, promCfg ...PrometheusConfig) error {
+	var activePromCfg PrometheusConfig
+	if len(promCfg) > 0 {
+		activePromCfg = promCfg[0]
+	}
 	if !term.IsTerminal(int(in.Fd())) || !term.IsTerminal(int(out.Fd())) || os.Getenv("TERM") == "dumb" {
 		return fmt.Errorf("interactive mode requires terminal stdin and stdout")
 	}
@@ -1162,6 +1704,9 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 	nodeSelected, nodeScroll, detailScroll, qosDetailScroll, hScroll, tableWidth := 0, 0, 0, 0, 0, 0
 	nodeDetailsOpen := false
 	headerFocused, selectedHeader, headerActivated := false, 0, false
+	var lastTelemNode string
+	var lastTelemTime time.Time
+	var cachedTelem *NodeTelemetry
 	width, height, menuStartY, headerY, rows := 80, 24, 2, 5, 1
 	ids := []string{}
 	columns := []headerColumn{}
@@ -1355,7 +1900,18 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				}
 				nodeScroll = min(nodeScroll, max(0, len(bodyLines)-visibleRows))
 				if pane == "gpu" && nodeDetailsOpen && len(s.nodes) > 0 {
-					for _, line := range nodeDetails(s.nodes[nodeSelected], s.Jobs, width-1, visibleRows, detailScroll, colorBars) {
+					selNode := s.nodes[nodeSelected]
+					if !activePromCfg.Disabled && activePromCfg.URL != "" {
+						if selNode.Name != lastTelemNode || time.Since(lastTelemTime) > 3*time.Second {
+							telemCtx, telemCancel := context.WithTimeout(root, 2*time.Second)
+							t, _ := fetchNodeTelemetry(telemCtx, activePromCfg, selNode.Name)
+							telemCancel()
+							cachedTelem = t
+							lastTelemNode = selNode.Name
+							lastTelemTime = time.Now()
+						}
+					}
+					for _, line := range nodeDetails(selNode, s.Jobs, width-1, visibleRows, detailScroll, colorBars, cachedTelem) {
 						if colorBars {
 							fmt.Fprint(&b, fitANSI(line, width-1), "\r\n")
 						} else {
@@ -1641,6 +2197,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					s = updated
 					message = ""
 				}
+				lastTelemTime = time.Time{}
 			case "click":
 				if ev.y >= menuStartY && ev.y < menuStartY+len(viewMenu(paneMenuLabel(pane))) {
 					for _, column := range menuColumns() {
@@ -1767,6 +2324,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 			} else {
 				s = updated
 				message = ""
+				lastTelemTime = time.Time{}
 				if pane == "account" || pane == "account-jobs" {
 					tableAccount := ""
 					if pane == "account-jobs" {
