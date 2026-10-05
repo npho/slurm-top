@@ -227,7 +227,7 @@ type tableColumn struct {
 
 func rightAlignedColumn(field string) bool {
 	switch field {
-	case "jobs", "pending-jobs", "gpu", "cpu", "cpu-gpu", "mem", "memory-cpu", "pending-gpu", "pending-cpu", "pending-cpu-gpu", "pending-mem", "pending-memory-cpu", "elapsed":
+	case "jobs", "pending-jobs", "gpu", "cpu", "cpu-gpu", "mem", "memory-cpu", "pending-gpu", "pending-cpu", "pending-cpu-gpu", "pending-mem", "pending-memory-cpu", "elapsed", "score":
 		return true
 	default:
 		return false
@@ -351,6 +351,125 @@ func accountRows(s Snapshot, account, by string, asc bool, color ...bool) ([]str
 	}
 	header, lines, headerColumns := renderTable(columns, rows, by, asc)
 	return []string{header}, lines, ids, headerColumns
+}
+
+func efficiencyRows(s Snapshot, by string, asc bool, effMap map[int]JobEfficiency, color ...bool) ([]string, []string, []string, []headerColumn) {
+	colorEnabled := len(color) > 0 && color[0]
+	running := make([]Job, 0, len(s.Jobs))
+	for _, j := range s.Jobs {
+		if j.State == "RUNNING" {
+			running = append(running, j)
+		}
+	}
+	if by == "" {
+		by = "score"
+	}
+	sortEfficiencyJobs(running, effMap, by, asc)
+
+	columns := []tableColumn{
+		{"id", "JOB ID"},
+		{"user", "USER"},
+		{"account", "ACCOUNT"},
+		{"score", "SCORE"},
+		{"elapsed", "ELAPSED"},
+		{"gpu", "GPU"},
+		{"cpu", "CPU"},
+		{"cpu-gpu", "C:G"},
+		{"mem", "MEM"},
+		{"memory-cpu", "M:C"},
+		{"qos", "QOS"},
+		{"partition", "PARTITION"},
+		{"name", "NAME"},
+	}
+	rows := make([][]string, 0, len(running))
+	ids := make([]string, 0, len(running))
+	for _, j := range running {
+		ids = append(ids, strconv.Itoa(j.ID)+"/"+j.State)
+		scoreStr := "0.00"
+		if eff, ok := effMap[j.ID]; ok {
+			scoreStr = fmt.Sprintf("%.2f", eff.Score)
+		}
+		rows = append(rows, []string{
+			strconv.Itoa(j.ID),
+			j.User,
+			j.Account,
+			scoreStr,
+			j.Elapsed,
+			strconv.Itoa(j.GPUs),
+			strconv.Itoa(j.CPUs),
+			cpuGPU(j.CPUs, j.GPUs),
+			gb(j.MemoryMB) + "G",
+			memoryCPU(j.MemoryMB, j.CPUs),
+			displayQoS(j.QoS, colorEnabled),
+			j.Partition,
+			j.Name,
+		})
+	}
+	header, lines, headerColumns := renderTable(columns, rows, by, asc)
+	return []string{header}, lines, ids, headerColumns
+}
+
+func sortEfficiencyJobs(jobs []Job, effMap map[int]JobEfficiency, by string, asc bool) {
+	sort.Slice(jobs, func(i, j int) bool {
+		a, b := jobs[i], jobs[j]
+		cmp := 0
+		switch by {
+		case "score":
+			var scA, scB float64
+			if eff, ok := effMap[a.ID]; ok {
+				scA = eff.Score
+			}
+			if eff, ok := effMap[b.ID]; ok {
+				scB = eff.Score
+			}
+			if scA < scB {
+				cmp = -1
+			} else if scA > scB {
+				cmp = 1
+			}
+		case "account":
+			cmp = strings.Compare(a.Account, b.Account)
+		case "user":
+			cmp = strings.Compare(a.User, b.User)
+		case "name":
+			cmp = strings.Compare(a.Name, b.Name)
+		case "qos":
+			cmp = strings.Compare(a.QoS, b.QoS)
+		case "partition":
+			cmp = strings.Compare(a.Partition, b.Partition)
+		case "elapsed":
+			cmp = a.ElapsedMinutes - b.ElapsedMinutes
+		case "cpu-gpu":
+			left, right := ratioSortValue(a.CPUs, a.GPUs), ratioSortValue(b.CPUs, b.GPUs)
+			if left < right {
+				cmp = -1
+			} else if left > right {
+				cmp = 1
+			}
+		case "memory-cpu":
+			left, right := ratioSortValue(a.MemoryMB, a.CPUs), ratioSortValue(b.MemoryMB, b.CPUs)
+			if left < right {
+				cmp = -1
+			} else if left > right {
+				cmp = 1
+			}
+		case "cpu":
+			cmp = a.CPUs - b.CPUs
+		case "gpu":
+			cmp = a.GPUs - b.GPUs
+		case "mem":
+			cmp = a.MemoryMB - b.MemoryMB
+		default:
+			cmp = a.ID - b.ID
+		}
+		if cmp == 0 {
+			return a.ID < b.ID
+		}
+		if asc {
+			return cmp < 0
+		}
+		return cmp > 0
+	})
 }
 
 type headerColumn struct {
@@ -678,12 +797,13 @@ func paneMenuLabel(pane string) string {
 		"qos":          "QOS",
 		"qos-details":  "QOS",
 		"gpu":          "NODES",
+		"efficiency":   "EFFICIENCY",
 	}[pane]
 }
 
 // viewMenu presents every lower-pane view and highlights the active label.
 func viewMenu(active string) []string {
-	labels := []string{"USER", "ACCOUNT", "QOS", "NODES"}
+	labels := []string{"USER", "ACCOUNT", "QOS", "NODES", "EFFICIENCY"}
 	for i, label := range labels {
 		padded := " " + label + " "
 		if label == active {
@@ -698,7 +818,7 @@ func viewMenu(active string) []string {
 func menuColumns() []headerColumn {
 	labels := []struct {
 		field, label string
-	}{{"cluster", "USER"}, {"account", "ACCOUNT"}, {"qos", "QOS"}, {"gpu", "NODES"}}
+	}{{"cluster", "USER"}, {"account", "ACCOUNT"}, {"qos", "QOS"}, {"gpu", "NODES"}, {"efficiency", "EFFICIENCY"}}
 	columns := make([]headerColumn, len(labels))
 	start := 1
 	for i, item := range labels {
@@ -730,7 +850,7 @@ func cycleTopPane(pane string, reverse bool) string {
 		}
 		return "gpu"
 	}
-	panes := []string{"cluster", "account", "qos", "gpu"}
+	panes := []string{"cluster", "account", "qos", "gpu", "efficiency"}
 	for i, candidate := range panes {
 		if pane != candidate {
 			continue
@@ -1816,6 +1936,45 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 	var lastTelemNode string
 	var lastTelemTime time.Time
 	var cachedTelem *NodeTelemetry
+	var lastEffTime time.Time
+	var cachedJobEfficiencies map[int]JobEfficiency
+	effChan := make(chan map[int]JobEfficiency, 1)
+	effCalculating := false
+	var effLastAttempt time.Time
+
+	triggerEffCalc := func(jobs []Job, nodes []Node) {
+		if effCalculating || activePromCfg.Disabled || activePromCfg.URL == "" || len(jobs) == 0 {
+			return
+		}
+		effCalculating = true
+		effLastAttempt = time.Now()
+		jobsCopy := make([]Job, len(jobs))
+		copy(jobsCopy, jobs)
+		nodesCopy := make([]Node, len(nodes))
+		copy(nodesCopy, nodes)
+
+		go func() {
+			effCtx, effCancel := context.WithTimeout(root, 60*time.Second)
+			defer effCancel()
+			effs, err := fetchClusterJobEfficiencies(effCtx, activePromCfg, jobsCopy, nodesCopy)
+			if err != nil || effs == nil {
+				select {
+				case effChan <- nil:
+				case <-root.Done():
+				}
+				return
+			}
+			select {
+			case effChan <- effs:
+			case <-root.Done():
+			}
+		}()
+	}
+
+	// Automatically start calculating the efficiency table upon program start in parallel
+	triggerEffCalc(s.Jobs, s.nodes)
+
+	efficiencySelected, efficiencyScroll := 0, 0
 	width, height, menuStartY, headerY, rows := 80, 24, 2, 5, 1
 	ids := []string{}
 	columns := []headerColumn{}
@@ -1840,7 +1999,14 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 		if rows < 1 {
 			rows = 1
 		}
-		isTable := pane == "cluster" || pane == "user" || pane == "account" || pane == "account-jobs" || pane == "qos"
+		if pane == "efficiency" && len(s.Jobs) > 0 {
+			if !activePromCfg.Disabled && activePromCfg.URL != "" {
+				if cachedJobEfficiencies == nil && !effCalculating && time.Since(effLastAttempt) > 10*time.Second {
+					triggerEffCalc(s.Jobs, s.nodes)
+				}
+			}
+		}
+		isTable := pane == "cluster" || pane == "user" || pane == "account" || pane == "account-jobs" || pane == "qos" || pane == "efficiency"
 		tableContentWidth := width - 1
 		var headers, items []string
 		if isTable {
@@ -1857,6 +2023,11 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				var rowIDs []string
 				var currentColumns []headerColumn
 				headers, items, rowIDs, currentColumns = qosRows(s, by, asc, colorBars)
+				ids, columns = rowIDs, currentColumns
+			} else if pane == "efficiency" {
+				var rowIDs []string
+				var currentColumns []headerColumn
+				headers, items, rowIDs, currentColumns = efficiencyRows(s, by, asc, cachedJobEfficiencies, colorBars)
 				ids, columns = rowIDs, currentColumns
 			} else {
 				tableUser := ""
@@ -1942,6 +2113,20 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 			title = fmt.Sprintf("slurm-top  %s  %d users / 1 account / %d running / %d pending  %s", s.UpdatedAt.Format("15:04:05"), users, running, pending, account)
 		} else if pane == "qos-details" {
 			title = fmt.Sprintf("slurm-top  %s  QoS: %s", s.UpdatedAt.Format("15:04:05"), selectedQoS)
+		} else if pane == "efficiency" {
+			runningCount := 0
+			for _, j := range s.Jobs {
+				if j.State == "RUNNING" {
+					runningCount++
+				}
+			}
+			title = fmt.Sprintf("slurm-top  %s  %d running jobs ranked by efficiency", s.UpdatedAt.Format("15:04:05"), runningCount)
+			if !lastEffTime.IsZero() {
+				title += fmt.Sprintf(" (telemetry %s)", lastEffTime.Format("15:04:05"))
+			}
+			if cachedJobEfficiencies == nil && effCalculating {
+				title += " (calculating telemetry...)"
+			}
 		}
 		fmt.Fprint(&b, fit(title, width-1), "\r\n")
 		for _, line := range bars {
@@ -1961,7 +2146,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				header = highlightHeader(header, columns[selectedHeader])
 			}
 			offset := 0
-			if pane == "user" || pane == "account-jobs" {
+			if pane == "user" || pane == "account-jobs" || pane == "efficiency" {
 				offset = hScroll
 			}
 			marker := ""
@@ -2045,6 +2230,8 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 			footer = "Jobs: " + account + "  Tab/Shift-Tab views  ←/→ scroll table (← accounts at left edge)  Esc accounts  q quit"
 		} else if pane == "qos-details" {
 			footer = "QoS: " + selectedQoS + "  Tab/Shift-Tab views  ↑/↓ scroll  Esc qos  q quit"
+		} else if pane == "efficiency" {
+			footer = "Tab/Shift-Tab views  ↑ header/rows  ←/→ scroll table  Enter sort  q quit"
 		} else if pane == "gpu" && nodeDetailsOpen {
 			footer = "Node details  ↑/↓ scroll  Esc node grid  q quit"
 		} else if pane == "gpu" {
@@ -2069,7 +2256,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				return err
 			}
 		case ev := <-events:
-			tablePane := pane == "cluster" || pane == "user" || pane == "account" || pane == "account-jobs" || pane == "qos"
+			tablePane := pane == "cluster" || pane == "user" || pane == "account" || pane == "account-jobs" || pane == "qos" || pane == "efficiency"
 			switch ev.key {
 			case "q", "Q", "\x03":
 				return nil
@@ -2080,14 +2267,19 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					accountSelected, accountScroll = selected, scroll
 				} else if pane == "qos" {
 					qosSelected, qosScroll = selected, scroll
+				} else if pane == "efficiency" {
+					efficiencySelected, efficiencyScroll = selected, scroll
 				}
 				pane = cycleTopPane(pane, ev.key == "shift-tab")
-				if pane == "account" && (by == "user" || by == "qos") {
+				if pane == "account" && (by == "user" || by == "qos" || by == "score") {
 					by = "account"
-				} else if pane == "cluster" && (by == "account" || by == "qos") {
+				} else if pane == "cluster" && (by == "account" || by == "qos" || by == "score") {
 					by = "user"
-				} else if pane == "qos" && (by == "user" || by == "account") {
+				} else if pane == "qos" && (by == "user" || by == "account" || by == "score") {
 					by = "qos"
+				} else if pane == "efficiency" {
+					by = "score"
+					asc = true
 				}
 				if pane == "cluster" {
 					selected, scroll = userSelected, userScroll
@@ -2095,6 +2287,8 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					selected, scroll = accountSelected, accountScroll
 				} else if pane == "qos" {
 					selected, scroll = qosSelected, qosScroll
+				} else if pane == "efficiency" {
+					selected, scroll = efficiencySelected, efficiencyScroll
 				} else {
 					selected, scroll = 0, 0
 				}
@@ -2198,7 +2392,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					qosSummaryBy, qosSummaryAsc = by, asc
 					selectedQoS, pane = ids[selected], "qos-details"
 					qosDetailScroll = 0
-				} else if pane == "user" || pane == "account-jobs" {
+				} else if pane == "user" || pane == "account-jobs" || pane == "efficiency" {
 					hScroll = min(hScroll+max(1, (width-1)/2), max(0, tableWidth-(width-1)))
 				}
 			case "\r", "\n":
@@ -2219,6 +2413,9 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 						asc = !asc
 					} else {
 						by, asc = field, false
+						if field == "score" {
+							asc = true
+						}
 					}
 					headerActivated = true
 					selected, scroll = 0, 0
@@ -2252,6 +2449,8 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					returnQoS, pane = selectedQoS, "qos"
 					by, asc = qosSummaryBy, qosSummaryAsc
 					selected, scroll = 0, 0
+				} else if pane == "efficiency" {
+					selected, scroll, hScroll = 0, 0, 0
 				}
 			case "left":
 				if !tablePane {
@@ -2270,7 +2469,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				} else if headerFocused && selectedHeader > 0 {
 					selectedHeader--
 					headerActivated = false
-				} else if (pane == "user" || pane == "account-jobs") && hScroll > 0 {
+				} else if (pane == "user" || pane == "account-jobs" || pane == "efficiency") && hScroll > 0 {
 					hScroll = max(0, hScroll-max(1, (width-1)/2))
 				} else if pane == "user" {
 					returnUser, pane = user, "cluster"
@@ -2281,18 +2480,27 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					by, asc = accountSummaryBy, accountSummaryAsc
 					selected, scroll, hScroll = 0, 0, 0
 				}
-			case "g", "c", "m", "u", "a":
-				if pane == "cluster" && ev.key != "a" {
+			case "g", "c", "m", "u", "a", "s", "e":
+				if pane == "cluster" && ev.key != "a" && ev.key != "s" && ev.key != "e" {
 					by = map[string]string{"g": "gpu", "c": "cpu", "m": "mem", "u": "user"}[ev.key]
 					asc = false
 					selected, scroll = 0, 0
-				} else if pane == "account" && ev.key != "u" {
+				} else if pane == "account" && ev.key != "u" && ev.key != "s" && ev.key != "e" {
 					by = map[string]string{"g": "gpu", "c": "cpu", "m": "mem", "a": "account"}[ev.key]
 					asc = false
 					selected, scroll = 0, 0
-				} else if pane == "qos" && ev.key != "u" && ev.key != "a" {
+				} else if pane == "qos" && ev.key != "u" && ev.key != "a" && ev.key != "s" && ev.key != "e" {
 					by = map[string]string{"g": "gpu", "c": "cpu", "m": "mem"}[ev.key]
 					asc = false
+					selected, scroll = 0, 0
+				} else if pane == "efficiency" {
+					if ev.key == "s" || ev.key == "e" {
+						by = "score"
+						asc = true
+					} else {
+						by = map[string]string{"g": "gpu", "c": "cpu", "m": "mem", "u": "user", "a": "account"}[ev.key]
+						asc = false
+					}
 					selected, scroll = 0, 0
 				}
 			case "r":
@@ -2307,6 +2515,9 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					message = ""
 				}
 				lastTelemTime = time.Time{}
+				if !effCalculating {
+					triggerEffCalc(s.Jobs, s.nodes)
+				}
 			case "click":
 				if ev.y >= menuStartY && ev.y < menuStartY+len(viewMenu(paneMenuLabel(pane))) {
 					for _, column := range menuColumns() {
@@ -2317,14 +2528,19 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 								accountSelected, accountScroll = selected, scroll
 							} else if pane == "qos" {
 								qosSelected, qosScroll = selected, scroll
+							} else if pane == "efficiency" {
+								efficiencySelected, efficiencyScroll = selected, scroll
 							}
 							pane = column.field
-							if pane == "account" && (by == "user" || by == "qos") {
+							if pane == "account" && (by == "user" || by == "qos" || by == "score") {
 								by = "account"
-							} else if pane == "cluster" && (by == "account" || by == "qos") {
+							} else if pane == "cluster" && (by == "account" || by == "qos" || by == "score") {
 								by = "user"
-							} else if pane == "qos" && (by == "user" || by == "account") {
+							} else if pane == "qos" && (by == "user" || by == "account" || by == "score") {
 								by = "qos"
+							} else if pane == "efficiency" {
+								by = "score"
+								asc = true
 							}
 							if pane == "cluster" {
 								selected, scroll = userSelected, userScroll
@@ -2332,6 +2548,8 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 								selected, scroll = accountSelected, accountScroll
 							} else if pane == "qos" {
 								selected, scroll = qosSelected, qosScroll
+							} else if pane == "efficiency" {
+								selected, scroll = efficiencySelected, efficiencyScroll
 							} else {
 								selected, scroll = 0, 0
 							}
@@ -2372,6 +2590,9 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 						} else {
 							by = field
 							asc = false
+							if field == "score" {
+								asc = true
+							}
 						}
 						selected = 0
 						scroll = 0
@@ -2419,6 +2640,19 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 			if err := draw(); err != nil {
 				return err
 			}
+		case newEffs := <-effChan:
+			effCalculating = false
+			if newEffs != nil {
+				cachedJobEfficiencies = newEffs
+				lastEffTime = time.Now()
+			}
+			if pane == "efficiency" {
+				if err := draw(); err != nil {
+					return err
+				}
+			}
+			// Once a calculation completes, restart the calculation process serially
+			triggerEffCalc(s.Jobs, s.nodes)
 		case <-ticker.C:
 			id := ""
 			if selected < len(ids) {
@@ -2434,6 +2668,9 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				s = updated
 				message = ""
 				lastTelemTime = time.Time{}
+				if !effCalculating && time.Since(effLastAttempt) >= 2*time.Second {
+					triggerEffCalc(s.Jobs, s.nodes)
+				}
 				if pane == "account" || pane == "account-jobs" {
 					tableAccount := ""
 					if pane == "account-jobs" {
@@ -2448,6 +2685,14 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					}
 				} else if pane == "qos" {
 					_, _, next, _ := qosRows(s, by, asc)
+					for i, item := range next {
+						if item == id {
+							selected = i
+							break
+						}
+					}
+				} else if pane == "efficiency" {
+					_, _, next, _ := efficiencyRows(s, by, asc, cachedJobEfficiencies)
 					for i, item := range next {
 						if item == id {
 							selected = i

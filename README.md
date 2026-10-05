@@ -98,11 +98,11 @@ The summary defaults to running GPU allocation descending; opening a user
 shows that user's jobs sorted by elapsed time descending. Use **Up/Down** or
 the mouse wheel to select a user, **Right** or **Enter** to open their job
 list, and **Left** or **Escape** to return. Returning restores the prior
-summary sort and selection. The menu shows `USER`, `ACCOUNT`, `QOS`, and `NODES`; the active
+summary sort and selection. The menu shows `USER`, `ACCOUNT`, `QOS`, `NODES`, and `EFFICIENCY`; the active
 lower-pane view is highlighted. The selected user's job table uses the
-`USER` menu label, an account's job table uses the `ACCOUNT` menu label, and a QoS details view uses the `QOS` menu label. Use **Tab** and **Shift-Tab** to cycle through `USER`, `ACCOUNT`, `QOS`, and
-`NODES`. The selected user's or account's jobs, or a QoS's details, are opened with **Right** or
-**Enter**. You can also click the `USER`, `ACCOUNT`, `QOS`, or `NODES` menu item to select it. A
+`USER` menu label, an account's job table uses the `ACCOUNT` menu label, and a QoS details view uses the `QOS` menu label. Use **Tab** and **Shift-Tab** to cycle through `USER`, `ACCOUNT`, `QOS`,
+`NODES`, and `EFFICIENCY`. The selected user's or account's jobs, or a QoS's details, are opened with **Right** or
+**Enter**. You can also click the `USER`, `ACCOUNT`, `QOS`, `NODES`, or `EFFICIENCY` menu item to select it. A
 horizontal rule separates the menu from the
 current view. In `QOS`, a table displays Quality of Service allocations and pending demand across sortable columns. Selecting a QoS row and pressing **Right** or **Enter** opens that QoS's scrollable details view displaying job states, running allocations, pending requests, runtime/elapsed metrics, limits, users, accounts, partitions, nodes, and jobs; press **Escape** or **Left** to return to the QOS table. In `NODES`, directional arrows select nodes in the displayed grid;
 clicking a node or pressing **Enter** replaces the grid with that node's
@@ -121,14 +121,30 @@ bars and 0/0 / 0/0G without `?` placeholders. All columns (GPU, GPU MEM, CPU,
 MEM) align vertically with uniform status bar lengths across groups. Typed H200
 and H200-MIG GPU allocations are shown separately; generic GPU allocations remain
 generically labeled. Press **Escape** to return to the grid; the mouse wheel
-scrolls the details.
+scrolls the details. In `EFFICIENCY`, a table ranks all currently running jobs
+across the cluster by resource efficiency score. The program automatically begins
+calculating telemetry in the background on startup and runs continuous serial
+updates (restarting the next calculation as soon as each one completes). The
+table is maintained in a hot in-memory cache, displaying the last cached version
+until the new calculation is ready so pane navigation remains instantaneous. The
+score weights GPU compute
+duty cycle, GPU VRAM usage, CPU core usage, and host memory usage equally across
+requested resource types, normalized against Slurm requested/allocated resources.
+Each resource utilization takes the median of Prometheus telemetry sample points
+over the entire life of the job back to its start time. When a job does not request
+GPUs (0 GPUs allocated), GPU compute and GPU memory are weighted as 0 so they do
+not count towards the efficiency score calculation (which evaluates requested CPU
+and host memory equally). The table defaults to sorting by least efficient first
+(ascending score), with shortcuts `s` or `e` to sort by score. Columns include
+`JOB ID`, `USER`, `ACCOUNT`, `SCORE`, `ELAPSED`, `GPU`, `CPU`, `C:G`, `MEM`,
+`M:C`, `QOS`, `PARTITION`, and `NAME`.
 
 Press **Up** from the first row to focus the column header; use **Left/Right**
 to choose a column and **Enter** to sort it descending, then ascending on the
-next Enter. Click a column heading to sort (click again to reverse it), or
+next Enter (or ascending first for `SCORE`). Click a column heading to sort (click again to reverse it), or
 click a summary row to open that user's jobs. In a job table that is wider than the terminal, use
 **Left/Right** while a row is focused to scroll horizontally; **Left** at its
-left edge returns to the summary. Keyboard sorting shortcuts are `g` (GPU),
+left edge returns to the summary. Keyboard sorting shortcuts are `s`/`e` (efficiency score), `g` (GPU),
 `c` (CPU), `m` (memory), `j` (running jobs), `u` (user), and `a` (account); `r` refreshes;
 `q` or Ctrl-C exits.
 

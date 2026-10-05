@@ -316,10 +316,10 @@ func TestUsagePairAlignment(t *testing.T) {
 
 func TestTopPaneCycling(t *testing.T) {
 	columns := menuColumns()
-	if len(columns) != 4 || columns[0].field != "cluster" || columns[1].field != "account" || columns[2].field != "qos" || columns[3].field != "gpu" {
+	if len(columns) != 5 || columns[0].field != "cluster" || columns[1].field != "account" || columns[2].field != "qos" || columns[3].field != "gpu" || columns[4].field != "efficiency" {
 		t.Fatalf("menu columns = %v", columns)
 	}
-	if columns[0].end >= columns[1].start || columns[1].end >= columns[2].start || columns[2].end >= columns[3].start {
+	if columns[0].end >= columns[1].start || columns[1].end >= columns[2].start || columns[2].end >= columns[3].start || columns[3].end >= columns[4].start {
 		t.Fatalf("overlapping menu columns = %v", columns)
 	}
 	if got := cycleTopPane("cluster", false); got != "account" {
@@ -331,11 +331,17 @@ func TestTopPaneCycling(t *testing.T) {
 	if got := cycleTopPane("qos", false); got != "gpu" {
 		t.Fatalf("Tab from qos = %q", got)
 	}
-	if got := cycleTopPane("gpu", false); got != "cluster" {
+	if got := cycleTopPane("gpu", false); got != "efficiency" {
 		t.Fatalf("Tab from gpu = %q", got)
 	}
-	if got := cycleTopPane("cluster", true); got != "gpu" {
+	if got := cycleTopPane("efficiency", false); got != "cluster" {
+		t.Fatalf("Tab from efficiency = %q", got)
+	}
+	if got := cycleTopPane("cluster", true); got != "efficiency" {
 		t.Fatalf("Shift-Tab from cluster = %q", got)
+	}
+	if got := cycleTopPane("efficiency", true); got != "gpu" {
+		t.Fatalf("Shift-Tab from efficiency = %q", got)
 	}
 	if got := cycleTopPane("gpu", true); got != "qos" {
 		t.Fatalf("Shift-Tab from gpu = %q", got)
@@ -468,7 +474,7 @@ func TestViewMenu(t *testing.T) {
 	if len(menu) != 1 {
 		t.Fatalf("menu lines = %d, want 1", len(menu))
 	}
-	if got := sgrPattern.ReplaceAllString(menu[0], ""); got != " USER    ACCOUNT    QOS    NODES " {
+	if got := sgrPattern.ReplaceAllString(menu[0], ""); got != " USER    ACCOUNT    QOS    NODES    EFFICIENCY " {
 		t.Fatalf("menu labels = %q", got)
 	}
 	if !strings.Contains(menu[0], "\x1b[7m USER \x1b[27m") {
@@ -485,6 +491,9 @@ func TestViewMenu(t *testing.T) {
 	}
 	if qosDetailsMenu := viewMenu(paneMenuLabel("qos-details")); !strings.Contains(qosDetailsMenu[0], "\x1b[7m QOS \x1b[27m") {
 		t.Fatalf("qos details view is not highlighted as QOS: %q", qosDetailsMenu)
+	}
+	if effMenu := viewMenu(paneMenuLabel("efficiency")); !strings.Contains(effMenu[0], "\x1b[7m EFFICIENCY \x1b[27m") {
+		t.Fatalf("efficiency view is not highlighted as EFFICIENCY: %q", effMenu)
 	}
 	if userMenu := viewMenu(paneMenuLabel("user")); !strings.Contains(userMenu[0], "\x1b[7m USER \x1b[27m") {
 		t.Fatalf("user jobs view is not highlighted as USER: %q", userMenu)
@@ -781,5 +790,103 @@ func TestCropANSIStateTracking(t *testing.T) {
 	selected := "\x1b[7m" + row + "\x1b[0m"
 	if strings.Contains(selected, "\x1b[0m░") || !strings.Contains(selected, "name") {
 		t.Fatalf("unexpected reset in cropped selected row: %q", selected)
+	}
+}
+
+func TestEfficiencyRows(t *testing.T) {
+	snap := Snapshot{
+		Jobs: []Job{
+			{
+				ID:             1,
+				User:           "alice",
+				Account:        "ai-lab",
+				Name:           "train-bert",
+				State:          "RUNNING",
+				CPUs:           8,
+				GPUs:           2,
+				MemoryMB:       16384,
+				Elapsed:        "50% [0-01:00|0-02:00]",
+				ElapsedMinutes: 60,
+				QoS:            "high",
+				Partition:      "gpu",
+			},
+			{
+				ID:             2,
+				User:           "bob",
+				Account:        "nlp",
+				Name:           "eval",
+				State:          "RUNNING",
+				CPUs:           4,
+				GPUs:           1,
+				MemoryMB:       8192,
+				Elapsed:        "25% [0-00:30|0-02:00]",
+				ElapsedMinutes: 30,
+				QoS:            "normal",
+				Partition:      "gpu",
+			},
+			{
+				ID:       3,
+				User:     "carol",
+				Account:  "data",
+				Name:     "preprocess",
+				State:    "PENDING", // should be excluded from efficiency view
+				CPUs:     2,
+				GPUs:     0,
+				MemoryMB: 4096,
+				Elapsed:  "0%",
+			},
+		},
+	}
+
+	effMap := map[int]JobEfficiency{
+		1: {JobID: 1, Score: 0.85},
+		2: {JobID: 2, Score: 0.20},
+	}
+
+	// Default sort: least efficient first (score ascending)
+	headers, lines, ids, cols := efficiencyRows(snap, "score", true, effMap)
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 running job rows, got %d", len(lines))
+	}
+	if len(ids) != 2 || ids[0] != "2/RUNNING" || ids[1] != "1/RUNNING" {
+		t.Fatalf("expected job 2 (score 0.20) before job 1 (score 0.85), got ids: %v", ids)
+	}
+
+	cleanHeader := sgrPattern.ReplaceAllString(headers[0], "")
+	expectedCols := []string{"JOB ID", "USER", "ACCOUNT", "SCORE", "ELAPSED", "GPU", "CPU", "C:G", "MEM", "M:C", "QOS", "PARTITION", "NAME"}
+	for _, col := range expectedCols {
+		if !strings.Contains(cleanHeader, col) {
+			t.Errorf("header missing %q: %q", col, cleanHeader)
+		}
+	}
+
+	// Reverse sort: most efficient first (score descending)
+	_, _, idsDesc, _ := efficiencyRows(snap, "score", false, effMap)
+	if len(idsDesc) != 2 || idsDesc[0] != "1/RUNNING" || idsDesc[1] != "2/RUNNING" {
+		t.Fatalf("expected job 1 before job 2 when sorted descending, got ids: %v", idsDesc)
+	}
+
+	// Verify SCORE is right-aligned in headerColumn
+	var scoreCol *headerColumn
+	for i := range cols {
+		if cols[i].field == "score" {
+			scoreCol = &cols[i]
+			break
+		}
+	}
+	if scoreCol == nil {
+		t.Fatalf("score headerColumn not found in cols: %v", cols)
+	}
+	if !rightAlignedColumn("score") {
+		t.Fatalf("score should be rightAlignedColumn")
+	}
+
+	// Test bold preservation across horizontal scroll on efficiency header
+	fullHeader := headers[0]
+	for _, offset := range []int{0, 5, 15, 30} {
+		cropped := cropANSI(fullHeader, offset, 80)
+		if !strings.HasPrefix(cropped, "\x1b[1m") {
+			t.Fatalf("efficiency header at offset %d must start with bold: %q", offset, cropped)
+		}
 	}
 }
