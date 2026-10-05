@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseGresIndices(t *testing.T) {
@@ -870,4 +871,241 @@ func TestUniformStatusBarLengths(t *testing.T) {
 		}
 	}
 	t.Logf("\n%s\n", output)
+}
+
+func TestMedian(t *testing.T) {
+	if got := median(nil); got != 0 {
+		t.Errorf("median(nil) = %v, want 0", got)
+	}
+	if got := median([]float64{}); got != 0 {
+		t.Errorf("median([]) = %v, want 0", got)
+	}
+	if got := median([]float64{42}); got != 42 {
+		t.Errorf("median([42]) = %v, want 42", got)
+	}
+	// Odd length (unsorted)
+	if got := median([]float64{10, 5, 20}); got != 10 {
+		t.Errorf("median([10, 5, 20]) = %v, want 10", got)
+	}
+	// Even length
+	if got := median([]float64{10, 20, 30, 40}); got != 25 {
+		t.Errorf("median([10, 20, 30, 40]) = %v, want 25", got)
+	}
+}
+
+func TestParsePrometheusRangeResponse(t *testing.T) {
+	raw := []byte(`{
+		"status": "success",
+		"data": {
+			"resultType": "matrix",
+			"result": [
+				{
+					"metric": {"gpu": "0", "Hostname": "node1"},
+					"values": [
+						[1700000000, "50.0"],
+						[1700000060, "70.0"],
+						[1700000120, "90.0"]
+					]
+				}
+			]
+		}
+	}`)
+	series, err := parsePrometheusRangeResponse(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(series) != 1 {
+		t.Fatalf("expected 1 series, got %d", len(series))
+	}
+	if series[0].Metric["gpu"] != "0" || series[0].Metric["Hostname"] != "node1" {
+		t.Errorf("unexpected metric: %+v", series[0].Metric)
+	}
+	if len(series[0].Values) != 3 || len(series[0].Times) != 3 {
+		t.Fatalf("expected 3 values, got %d", len(series[0].Values))
+	}
+	if series[0].Values[0] != 50.0 || series[0].Values[1] != 70.0 || series[0].Values[2] != 90.0 {
+		t.Errorf("unexpected values: %v", series[0].Values)
+	}
+	if series[0].Times[0] != 1700000000 || series[0].Times[2] != 1700000120 {
+		t.Errorf("unexpected times: %v", series[0].Times)
+	}
+
+	// Error response
+	errRaw := []byte(`{"status": "error", "error": "range error"}`)
+	if _, err := parsePrometheusRangeResponse(errRaw); err == nil {
+		t.Error("expected error for status=error")
+	}
+}
+
+func TestFetchClusterJobEfficiencies(t *testing.T) {
+	now := float64(1700001000)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("query")
+		var resultJSON string
+		switch {
+		case strings.Contains(q, "DCGM_FI_DEV_GPU_UTIL"):
+			resultJSON = fmt.Sprintf(`{
+				"status": "success",
+				"data": {
+					"resultType": "matrix",
+					"result": [
+						{
+							"metric": {"Hostname": "node1", "gpu": "0"},
+							"values": [[%f, "40.0"], [%f, "60.0"], [%f, "80.0"]]
+						}
+					]
+				}
+			}`, now-100, now-50, now)
+		case strings.Contains(q, "DCGM_FI_DEV_FB_USED"):
+			resultJSON = fmt.Sprintf(`{
+				"status": "success",
+				"data": {
+					"resultType": "matrix",
+					"result": [
+						{
+							"metric": {"Hostname": "node1", "gpu": "0"},
+							"values": [[%f, "20000.0"], [%f, "40000.0"], [%f, "60000.0"]]
+						}
+					]
+				}
+			}`, now-100, now-50, now)
+		case strings.Contains(q, "DCGM_FI_DEV_FB_FREE"):
+			resultJSON = fmt.Sprintf(`{
+				"status": "success",
+				"data": {
+					"resultType": "matrix",
+					"result": [
+						{
+							"metric": {"Hostname": "node1", "gpu": "0"},
+							"values": [[%f, "60000.0"], [%f, "40000.0"], [%f, "20000.0"]]
+						}
+					]
+				}
+			}`, now-100, now-50, now)
+		case strings.Contains(q, "cpu"):
+			resultJSON = fmt.Sprintf(`{
+				"status": "success",
+				"data": {
+					"resultType": "matrix",
+					"result": [
+						{
+							"metric": {"slurmjobid": "101"},
+							"values": [[%f, "2.0"], [%f, "4.0"], [%f, "6.0"]]
+						},
+						{
+							"metric": {"slurmjobid": "102"},
+							"values": [[%f, "1.0"], [%f, "2.0"], [%f, "3.0"]]
+						}
+					]
+				}
+			}`, now-100, now-50, now, now-100, now-50, now)
+		case strings.Contains(q, "memory"):
+			// 8 GB in bytes = 8589934592
+			resultJSON = fmt.Sprintf(`{
+				"status": "success",
+				"data": {
+					"resultType": "matrix",
+					"result": [
+						{
+							"metric": {"slurmjobid": "101"},
+							"values": [[%f, "%d"], [%f, "%d"], [%f, "%d"]]
+						},
+						{
+							"metric": {"slurmjobid": "102"},
+							"values": [[%f, "%d"], [%f, "%d"], [%f, "%d"]]
+						}
+					]
+				}
+			}`, now-100, int64(4)*1024*1024*1024, now-50, int64(8)*1024*1024*1024, now, int64(12)*1024*1024*1024,
+				now-100, int64(2)*1024*1024*1024, now-50, int64(4)*1024*1024*1024, now, int64(6)*1024*1024*1024)
+		default:
+			resultJSON = `{"status": "success", "data": {"resultType": "matrix", "result": []}}`
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, resultJSON)
+	}))
+	defer ts.Close()
+
+	cfg := PrometheusConfig{URL: ts.URL, Timeout: 2 * time.Second}
+	nodes := []Node{
+		{Name: "node1", GPUTotal: 1, GPUAllocated: 1},
+	}
+	jobs := []Job{
+		{
+			ID:             101,
+			State:          "RUNNING",
+			CPUs:           8,
+			GPUs:           1,
+			MemoryMB:       16384, // 16GB
+			nodes:          "node1",
+			gpuIndices:     []int{0},
+			ElapsedMinutes: 10,
+		},
+		{
+			ID:             102,
+			State:          "RUNNING",
+			CPUs:           4,
+			GPUs:           0,    // 0 GPUs
+			MemoryMB:       8192, // 8GB
+			nodes:          "node1",
+			ElapsedMinutes: 10,
+		},
+	}
+
+	effs, err := fetchClusterJobEfficiencies(context.Background(), cfg, jobs, nodes)
+	if err != nil {
+		t.Fatalf("fetchClusterJobEfficiencies error: %v", err)
+	}
+	if len(effs) != 2 {
+		t.Fatalf("expected 2 job efficiencies, got %d", len(effs))
+	}
+
+	// Job 101:
+	// GPU Util median = 60.0% -> 60.0 / 100.0 = 0.60
+	// GPU Mem: FB_USED median = 40000, Total = 20000 + 60000 = 80000. Util = 40000/80000 = 0.50
+	// CPU: median = 4.0 cores / 8 cores = 0.50
+	// Mem: median = 8 GB / 16 GB = 0.50
+	// Score: (0.60 + 0.50 + 0.50 + 0.50) / 4 = 2.10 / 4 = 0.525
+	e101 := effs[101]
+	if mathAbs(e101.GPUUtil-0.60) > 0.01 {
+		t.Errorf("job 101 GPUUtil = %v, want ~0.60", e101.GPUUtil)
+	}
+	if mathAbs(e101.GPUMemUtil-0.50) > 0.01 {
+		t.Errorf("job 101 GPUMemUtil = %v, want ~0.50", e101.GPUMemUtil)
+	}
+	if mathAbs(e101.CPUUtil-0.50) > 0.01 {
+		t.Errorf("job 101 CPUUtil = %v, want ~0.50", e101.CPUUtil)
+	}
+	if mathAbs(e101.MemUtil-0.50) > 0.01 {
+		t.Errorf("job 101 MemUtil = %v, want ~0.50", e101.MemUtil)
+	}
+	if mathAbs(e101.Score-0.525) > 0.01 {
+		t.Errorf("job 101 Score = %v, want ~0.525", e101.Score)
+	}
+
+	// Job 102 (0 GPUs):
+	// GPU and GPU Mem are weighted 0 (unrequested).
+	// CPU: median = 2.0 cores / 4 cores = 0.50
+	// Mem: median = 4 GB / 8 GB = 0.50
+	// Score: (0.50 + 0.50) / 2 = 1.0 / 2 = 0.50
+	e102 := effs[102]
+	if e102.GPUUtil != 0.0 || e102.GPUMemUtil != 0.0 {
+		t.Errorf("job 102 GPU utilization should be 0.0, got gpu=%v gpumem=%v", e102.GPUUtil, e102.GPUMemUtil)
+	}
+	if mathAbs(e102.CPUUtil-0.50) > 0.01 {
+		t.Errorf("job 102 CPUUtil = %v, want ~0.50", e102.CPUUtil)
+	}
+	if mathAbs(e102.MemUtil-0.50) > 0.01 {
+		t.Errorf("job 102 MemUtil = %v, want ~0.50", e102.MemUtil)
+	}
+	if mathAbs(e102.Score-0.50) > 0.01 {
+		t.Errorf("job 102 Score = %v, want ~0.50", e102.Score)
+	}
+}
+
+func mathAbs(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
 }

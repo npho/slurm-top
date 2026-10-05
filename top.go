@@ -56,7 +56,19 @@ type Job struct {
 	MemoryMB       int    `json:"memory_mb"`
 	nodes          string
 	gpuIndices     []int
+	startTime      time.Time
 }
+
+func (j Job) StartTime() time.Time {
+	if !j.startTime.IsZero() {
+		return j.startTime
+	}
+	if j.ElapsedMinutes > 0 {
+		return time.Now().Add(-time.Duration(j.ElapsedMinutes) * time.Minute)
+	}
+	return time.Now()
+}
+
 type Usage struct {
 	User            string `json:"user"`
 	RunningJobs     int    `json:"running_jobs"`
@@ -276,7 +288,11 @@ func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 			u.MemoryMB += mem
 			a.MemoryMB += mem
 			gpuTypeCounts(j.Alloc, &snap.H200Allocated, &snap.MIGAllocated, &snap.OtherGPUAllocated)
-			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "RUNNING", Progress: jobProgress(j.State, j.StartTime, j.EndTime, at), Elapsed: elapsed, ElapsedMinutes: elapsedMinutes, CPUs: cpus, GPUs: gpus, MemoryMB: mem, nodes: j.Nodes, gpuIndices: parseGresIndices(j.GresDetail)})
+			var startTime time.Time
+			if j.StartTime.Set && !j.StartTime.Infinite && j.StartTime.Number > 0 {
+				startTime = time.Unix(j.StartTime.Number, 0)
+			}
+			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "RUNNING", Progress: jobProgress(j.State, j.StartTime, j.EndTime, at), Elapsed: elapsed, ElapsedMinutes: elapsedMinutes, CPUs: cpus, GPUs: gpus, MemoryMB: mem, nodes: j.Nodes, gpuIndices: parseGresIndices(j.GresDetail), startTime: startTime})
 		} else {
 			u.PendingJobs++
 			a.PendingJobs++
