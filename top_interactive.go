@@ -457,16 +457,121 @@ func coloredBar(n, total, width int, enabled bool) string {
 	return coloredBarFloat(float64(n)*100.0/float64(total), width, enabled)
 }
 
+type ansiState struct {
+	bold      bool
+	dim       bool
+	underline bool
+	reverse   bool
+	fg        string
+	bg        string
+}
+
+func (s *ansiState) update(params string) {
+	if params == "" {
+		*s = ansiState{}
+		return
+	}
+	parts := strings.Split(params, ";")
+	for k := 0; k < len(parts); k++ {
+		p, err := strconv.Atoi(parts[k])
+		if err != nil {
+			continue
+		}
+		switch {
+		case p == 0:
+			*s = ansiState{}
+		case p == 1:
+			s.bold = true
+		case p == 2:
+			s.dim = true
+		case p == 4:
+			s.underline = true
+		case p == 7:
+			s.reverse = true
+		case p == 22:
+			s.bold = false
+			s.dim = false
+		case p == 24:
+			s.underline = false
+		case p == 27:
+			s.reverse = false
+		case p == 39:
+			s.fg = ""
+		case (p >= 30 && p <= 37) || (p >= 90 && p <= 97):
+			s.fg = fmt.Sprintf("\x1b[%dm", p)
+		case p == 38:
+			if k+1 < len(parts) {
+				if parts[k+1] == "5" && k+2 < len(parts) {
+					s.fg = fmt.Sprintf("\x1b[38;5;%sm", parts[k+2])
+					k += 2
+				} else if parts[k+1] == "2" && k+4 < len(parts) {
+					s.fg = fmt.Sprintf("\x1b[38;2;%s;%s;%sm", parts[k+2], parts[k+3], parts[k+4])
+					k += 4
+				}
+			}
+		case p == 49:
+			s.bg = ""
+		case (p >= 40 && p <= 47) || (p >= 100 && p <= 107):
+			s.bg = fmt.Sprintf("\x1b[%dm", p)
+		case p == 48:
+			if k+1 < len(parts) {
+				if parts[k+1] == "5" && k+2 < len(parts) {
+					s.bg = fmt.Sprintf("\x1b[48;5;%sm", parts[k+2])
+					k += 2
+				} else if parts[k+1] == "2" && k+4 < len(parts) {
+					s.bg = fmt.Sprintf("\x1b[48;2;%s;%s;%sm", parts[k+2], parts[k+3], parts[k+4])
+					k += 4
+				}
+			}
+		}
+	}
+}
+
+func (s ansiState) emit(out *strings.Builder) {
+	if s.bold {
+		out.WriteString("\x1b[1m")
+	}
+	if s.dim {
+		out.WriteString("\x1b[2m")
+	}
+	if s.underline {
+		out.WriteString("\x1b[4m")
+	}
+	if s.reverse {
+		out.WriteString("\x1b[7m")
+	}
+	if s.fg != "" {
+		out.WriteString(s.fg)
+	}
+	if s.bg != "" {
+		out.WriteString(s.bg)
+	}
+}
+
 // Width-aware padding/clipping of ANSI SGR text: escape codes have zero width.
 func cropANSI(s string, offset, width int) string {
+	if offset < 0 {
+		offset = 0
+	}
+	if width <= 0 {
+		return "\x1b[0m"
+	}
 	var out strings.Builder
+	var state ansiState
+	stateEmitted := false
 	cells, written := 0, 0
 	for i := 0; i < len(s) && written < width; {
 		if s[i] == 27 && i+1 < len(s) && s[i+1] == '[' {
 			end := strings.IndexByte(s[i:], 'm')
 			if end >= 0 {
 				if cells >= offset {
+					if !stateEmitted && offset > 0 {
+						state.emit(&out)
+						stateEmitted = true
+					}
 					out.WriteString(s[i : i+end+1])
+				} else {
+					state.update(s[i+2 : i+end])
 				}
 				i += end + 1
 				continue
@@ -475,6 +580,10 @@ func cropANSI(s string, offset, width int) string {
 		r, size := utf8.DecodeRuneInString(s[i:])
 		i += size
 		if cells >= offset {
+			if !stateEmitted && offset > 0 {
+				state.emit(&out)
+				stateEmitted = true
+			}
 			out.WriteRune(r)
 			written++
 		}

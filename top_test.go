@@ -726,3 +726,60 @@ func TestMemoryUnitDisplayAndCondensing(t *testing.T) {
 		t.Errorf("horizontalBars missing 'T': %s", barsText)
 	}
 }
+
+func TestCropANSIHeaderRemainsBoldAcrossHorizontalScrolling(t *testing.T) {
+	// A typical user job header has multiple columns and is wider than 80 chars.
+	headers, _, _, cols := topRows(Snapshot{}, "alice", "id", false)
+	fullHeader := headers[0]
+	if !strings.HasPrefix(fullHeader, "\x1b[1m") {
+		t.Fatalf("fullHeader should start with bold: %q", fullHeader)
+	}
+
+	// First rendering (offset = 0)
+	rendered0 := cropANSI(fullHeader, 0, 80)
+	if !strings.HasPrefix(rendered0, "\x1b[1m") {
+		t.Fatalf("offset=0 rendered header must start with bold: %q", rendered0)
+	}
+
+	// Horizontal scrolling (offset > 0, e.g. offset = 5, 15, 30, 50)
+	for _, offset := range []int{5, 15, 30, 50} {
+		rendered := cropANSI(fullHeader, offset, 80)
+		if !strings.HasPrefix(rendered, "\x1b[1m") {
+			t.Fatalf("offset=%d rendered header must retain bold: %q", offset, rendered)
+		}
+	}
+
+	// With highlighted column
+	highlighted := highlightHeader(fullHeader, cols[1])
+	for _, offset := range []int{0, cols[1].start, cols[1].end + 2} {
+		rendered := cropANSI(highlighted, offset, 80)
+		if !strings.HasPrefix(rendered, "\x1b[1m") {
+			t.Fatalf("highlighted offset=%d rendered header must retain bold: %q", offset, rendered)
+		}
+	}
+}
+
+func TestCropANSIStateTracking(t *testing.T) {
+	s := "\x1b[1mHELLO \x1b[7mWORLD\x1b[27m REST\x1b[22m"
+	// Crop before WORLD
+	got := cropANSI(s, 0, 20)
+	if !strings.HasPrefix(got, "\x1b[1mHELLO") {
+		t.Fatalf("offset=0 got %q", got)
+	}
+	// Crop inside WORLD (offset=8)
+	got = cropANSI(s, 8, 20)
+	if !strings.HasPrefix(got, "\x1b[1m\x1b[7mRLD") {
+		t.Fatalf("offset=8 got %q, want bold and reverse on RLD", got)
+	}
+	// Crop in REST (offset=12)
+	got = cropANSI(s, 12, 20)
+	if !strings.HasPrefix(got, "\x1b[1mREST") {
+		t.Fatalf("offset=12 got %q, want bold on REST without reverse", got)
+	}
+	// Row selection wrapping does not reset inside line
+	row := cropANSI(progressBar(50, 10, true)+"  name", 3, 20)
+	selected := "\x1b[7m" + row + "\x1b[0m"
+	if strings.Contains(selected, "\x1b[0m░") || !strings.Contains(selected, "name") {
+		t.Fatalf("unexpected reset in cropped selected row: %q", selected)
+	}
+}
