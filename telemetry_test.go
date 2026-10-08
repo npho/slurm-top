@@ -873,6 +873,29 @@ func TestUniformStatusBarLengths(t *testing.T) {
 	t.Logf("\n%s\n", output)
 }
 
+func TestParseGresIndicesByNode(t *testing.T) {
+	tests := []struct {
+		name  string
+		nodes string
+		gres  []string
+		want  map[string][]int
+	}{
+		{"single node", "g004", []string{"gpu:h200:1(IDX:7)"}, map[string][]int{"g004": {7}}},
+		{"multi node keeps per-node indices", "g[003,014]", []string{"gpu:h200:4(IDX:1-2,5,7)", "gpu:h200:4(IDX:0-1,4-5)"},
+			map[string][]int{"g003": {1, 2, 5, 7}, "g014": {0, 1, 4, 5}}},
+		{"multi node count mismatch", "g[003,014]", []string{"gpu:h200:4(IDX:1-2,5,7)"}, nil},
+		{"no gpus", "n001", nil, nil},
+		{"no nodes", "", []string{"gpu:h200:1(IDX:0)"}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseGresIndicesByNode(tt.nodes, tt.gres); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("parseGresIndicesByNode(%q, %q) = %v, want %v", tt.nodes, tt.gres, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMedian(t *testing.T) {
 	if got := median(nil); got != 0 {
 		t.Errorf("median(nil) = %v, want 0", got)

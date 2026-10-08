@@ -121,6 +121,36 @@ func parseGresIndices(gresDetail []string) []int {
 	return indices
 }
 
+// parseGresIndicesByNode pairs each node of a job's hostlist with its GPU
+// indices. Slurm reports gres_detail as one entry per allocated node, in
+// hostlist order, and the same index can mean different GPUs on different
+// nodes. It returns nil when the pairing cannot be determined.
+func parseGresIndicesByNode(nodes string, gresDetail []string) map[string][]int {
+	names := expandNodeList(nodes)
+	if len(names) == 0 {
+		return nil
+	}
+	if len(names) == 1 {
+		if idx := parseGresIndices(gresDetail); len(idx) > 0 {
+			return map[string][]int{names[0]: idx}
+		}
+		return nil
+	}
+	if len(names) != len(gresDetail) {
+		return nil
+	}
+	byNode := make(map[string][]int, len(names))
+	for i, name := range names {
+		if idx := parseGresIndices(gresDetail[i : i+1]); len(idx) > 0 {
+			byNode[name] = idx
+		}
+	}
+	if len(byNode) == 0 {
+		return nil
+	}
+	return byNode
+}
+
 type promSeries struct {
 	Metric map[string]string
 	Value  float64

@@ -41,22 +41,23 @@ type queueResponse struct {
 	Jobs []jobRecord `json:"jobs"`
 }
 type Job struct {
-	ID             int    `json:"id"`
-	User           string `json:"user"`
-	Account        string `json:"account"`
-	QoS            string `json:"qos"`
-	Partition      string `json:"partition"`
-	Name           string `json:"name"`
-	State          string `json:"state"`
-	Progress       int    `json:"progress_percent"`
-	Elapsed        string `json:"elapsed"`
-	ElapsedMinutes int    `json:"elapsed_minutes"`
-	CPUs           int    `json:"cpus"`
-	GPUs           int    `json:"gpus"`
-	MemoryMB       int    `json:"memory_mb"`
-	nodes          string
-	gpuIndices     []int
-	startTime      time.Time
+	ID               int    `json:"id"`
+	User             string `json:"user"`
+	Account          string `json:"account"`
+	QoS              string `json:"qos"`
+	Partition        string `json:"partition"`
+	Name             string `json:"name"`
+	State            string `json:"state"`
+	Progress         int    `json:"progress_percent"`
+	Elapsed          string `json:"elapsed"`
+	ElapsedMinutes   int    `json:"elapsed_minutes"`
+	CPUs             int    `json:"cpus"`
+	GPUs             int    `json:"gpus"`
+	MemoryMB         int    `json:"memory_mb"`
+	nodes            string
+	gpuIndices       []int
+	gpuIndicesByNode map[string][]int // GPU indices per allocated node, for telemetry
+	startTime        time.Time
 }
 
 func (j Job) StartTime() time.Time {
@@ -292,7 +293,7 @@ func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 			if j.StartTime.Set && !j.StartTime.Infinite && j.StartTime.Number > 0 {
 				startTime = time.Unix(j.StartTime.Number, 0)
 			}
-			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "RUNNING", Progress: jobProgress(j.State, j.StartTime, j.EndTime, at), Elapsed: elapsed, ElapsedMinutes: elapsedMinutes, CPUs: cpus, GPUs: gpus, MemoryMB: mem, nodes: j.Nodes, gpuIndices: parseGresIndices(j.GresDetail), startTime: startTime})
+			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "RUNNING", Progress: jobProgress(j.State, j.StartTime, j.EndTime, at), Elapsed: elapsed, ElapsedMinutes: elapsedMinutes, CPUs: cpus, GPUs: gpus, MemoryMB: mem, nodes: j.Nodes, gpuIndices: parseGresIndices(j.GresDetail), gpuIndicesByNode: parseGresIndicesByNode(j.Nodes, j.GresDetail), startTime: startTime})
 		} else {
 			u.PendingJobs++
 			a.PendingJobs++
