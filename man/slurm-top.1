@@ -83,6 +83,8 @@ active GPU count, total GPU VRAM usage from NVIDIA DCGM, active CPU core count,
 and used host memory. Each running job on the node follows in a box labeled with
 its ID, user, and account, showing observed compute duty cycle across allocated GPUs,
 allocated GPU VRAM consumption, cgroup active CPU core usage, and cgroup host memory usage.
+A multi-node job shows only the CPUs, memory, and GPUs placed on the displayed node,
+against that node's usage; the EFFICIENCY score covers the job across every node.
 Node-detail telemetry is the mean of the 5 most recent readings taken 30 s apart, not a
 job-lifetime figure; if a refresh fails, the last reading for that node is kept.
 If Prometheus is disabled with --no-prometheus or unconfigured, unmeasured numerators

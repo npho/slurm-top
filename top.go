@@ -36,7 +36,46 @@ type jobRecord struct {
 	Alloc      string    `json:"tres_alloc_str"`
 	Requested  string    `json:"tres_req_str"`
 	GresDetail []string  `json:"gres_detail"`
+	// Resources is decoded separately because its shape differs across
+	// Slurm releases; see parseAllocByNode.
+	Resources json.RawMessage `json:"job_resources"`
 }
+
+// nodeShare is the part of a job's allocation placed on one node.
+type nodeShare struct {
+	CPUs     int
+	MemoryMB int
+}
+
+// parseAllocByNode reads each node's CPU and memory allocation from
+// job_resources.nodes.allocation. It returns nil when the field is absent or
+// in a format it does not recognize, so callers fall back to job totals.
+func parseAllocByNode(raw json.RawMessage) map[string]nodeShare {
+	var res struct {
+		Nodes struct {
+			Allocation []struct {
+				Name string `json:"name"`
+				CPUs struct {
+					Count int `json:"count"`
+				} `json:"cpus"`
+				Memory struct {
+					Allocated int `json:"allocated"`
+				} `json:"memory"`
+			} `json:"allocation"`
+		} `json:"nodes"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &res) != nil || len(res.Nodes.Allocation) == 0 {
+		return nil
+	}
+	shares := make(map[string]nodeShare, len(res.Nodes.Allocation))
+	for _, a := range res.Nodes.Allocation {
+		if a.Name != "" {
+			shares[a.Name] = nodeShare{CPUs: a.CPUs.Count, MemoryMB: a.Memory.Allocated}
+		}
+	}
+	return shares
+}
+
 type queueResponse struct {
 	Jobs []jobRecord `json:"jobs"`
 }
@@ -57,7 +96,21 @@ type Job struct {
 	nodes            string
 	gpuIndices       []int
 	gpuIndicesByNode map[string][]int // GPU indices per allocated node, for telemetry
+	allocByNode      map[string]nodeShare
 	startTime        time.Time
+}
+
+// onNode restricts a running job's allocation to one node for node-level
+// views. Parts Slurm does not report per node keep the job-wide value.
+func (j Job) onNode(node string) Job {
+	if share, ok := j.allocByNode[node]; ok {
+		j.CPUs, j.MemoryMB = share.CPUs, share.MemoryMB
+	}
+	if idx, ok := j.gpuIndicesByNode[node]; ok {
+		j.GPUs = len(idx)
+		j.gpuIndices = idx
+	}
+	return j
 }
 
 func (j Job) StartTime() time.Time {
@@ -293,7 +346,7 @@ func parseQueue(data []byte, nodes []Node, at time.Time) (Snapshot, error) {
 			if j.StartTime.Set && !j.StartTime.Infinite && j.StartTime.Number > 0 {
 				startTime = time.Unix(j.StartTime.Number, 0)
 			}
-			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "RUNNING", Progress: jobProgress(j.State, j.StartTime, j.EndTime, at), Elapsed: elapsed, ElapsedMinutes: elapsedMinutes, CPUs: cpus, GPUs: gpus, MemoryMB: mem, nodes: j.Nodes, gpuIndices: parseGresIndices(j.GresDetail), gpuIndicesByNode: parseGresIndicesByNode(j.Nodes, j.GresDetail), startTime: startTime})
+			snap.Jobs = append(snap.Jobs, Job{ID: j.ID, User: j.User, Account: j.Account, QoS: j.QoS, Partition: j.Partition, Name: j.Name, State: "RUNNING", Progress: jobProgress(j.State, j.StartTime, j.EndTime, at), Elapsed: elapsed, ElapsedMinutes: elapsedMinutes, CPUs: cpus, GPUs: gpus, MemoryMB: mem, nodes: j.Nodes, gpuIndices: parseGresIndices(j.GresDetail), gpuIndicesByNode: parseGresIndicesByNode(j.Nodes, j.GresDetail), allocByNode: parseAllocByNode(j.Resources), startTime: startTime})
 		} else {
 			u.PendingJobs++
 			a.PendingJobs++

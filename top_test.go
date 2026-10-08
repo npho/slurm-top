@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -887,6 +888,96 @@ func TestEfficiencyRows(t *testing.T) {
 		cropped := cropANSI(fullHeader, offset, 80)
 		if !strings.HasPrefix(cropped, "\x1b[1m") {
 			t.Fatalf("efficiency header at offset %d must start with bold: %q", offset, cropped)
+		}
+	}
+}
+
+func TestParseAllocByNode(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want map[string]nodeShare
+	}{
+		{"per-node allocation", `{"nodes":{"list":"g[005,023]","allocation":[
+			{"index":0,"name":"g005","cpus":{"count":64,"used":0},"memory":{"used":0,"allocated":1945600}},
+			{"index":1,"name":"g023","cpus":{"count":32,"used":0},"memory":{"used":0,"allocated":972800}}]}}`,
+			map[string]nodeShare{"g005": {CPUs: 64, MemoryMB: 1945600}, "g023": {CPUs: 32, MemoryMB: 972800}}},
+		{"absent", ``, nil},
+		{"older string nodes field", `{"nodes":"g[005,023]","allocated_nodes":[{"nodename":"g005","cpus":64}]}`, nil},
+		{"empty allocation", `{"nodes":{"allocation":[]}}`, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseAllocByNode(json.RawMessage(tt.raw)); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("parseAllocByNode = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseQueueKeepsPerNodeShares(t *testing.T) {
+	input := `{"jobs":[
+		{"job_id":349544,"user_name":"a","account":"b","job_state":["RUNNING"],"nodes":"g[005,023]",
+		 "tres_alloc_str":"cpu=128,mem=3800G,node=2,gres/gpu=16,gres/gpu:h200=16",
+		 "gres_detail":["gpu:h200:8(IDX:0-7)","gpu:h200:4(IDX:0-3)"],
+		 "job_resources":{"nodes":{"allocation":[
+			{"name":"g005","cpus":{"count":96},"memory":{"allocated":2850816}},
+			{"name":"g023","cpus":{"count":32},"memory":{"allocated":1040384}}]}}},
+		{"job_id":2,"user_name":"a","account":"b","job_state":["RUNNING"],"nodes":"g001",
+		 "tres_alloc_str":"cpu=4,mem=8G","job_resources":{"nodes":"g001"}}]}`
+	s, err := parseQueue([]byte(input), nil, time.Now())
+	if err != nil {
+		t.Fatalf("parseQueue: %v", err)
+	}
+	jobs := map[int]Job{}
+	for _, j := range s.Jobs {
+		jobs[j.ID] = j
+	}
+	multi := jobs[349544]
+	// Cluster-wide totals are unchanged; EFFICIENCY scores against them.
+	if multi.CPUs != 128 || multi.GPUs != 16 || multi.MemoryMB != 3800*1024 {
+		t.Errorf("job totals = %d CPUs, %d GPUs, %d MB", multi.CPUs, multi.GPUs, multi.MemoryMB)
+	}
+	tests := []struct {
+		node             string
+		cpus, gpus, memb int
+	}{
+		{"g005", 96, 8, 2850816},
+		{"g023", 32, 4, 1040384},
+	}
+	for _, tt := range tests {
+		got := multi.onNode(tt.node)
+		if got.CPUs != tt.cpus || got.GPUs != tt.gpus || got.MemoryMB != tt.memb {
+			t.Errorf("onNode(%s) = %d CPUs, %d GPUs, %d MB; want %d, %d, %d", tt.node, got.CPUs, got.GPUs, got.MemoryMB, tt.cpus, tt.gpus, tt.memb)
+		}
+	}
+	// An unrecognized job_resources shape keeps job-wide values.
+	if got := jobs[2].onNode("g001"); got.CPUs != 4 || got.MemoryMB != 8*1024 {
+		t.Errorf("fallback onNode = %d CPUs, %d MB; want 4, 8192", got.CPUs, got.MemoryMB)
+	}
+}
+
+func TestNodeDetailsUsesNodeShareOfJob(t *testing.T) {
+	job := Job{ID: 349544, User: "a", Account: "b", State: "RUNNING", CPUs: 128, GPUs: 16, MemoryMB: 3800 * 1024,
+		nodes: "g[005,023]", gpuIndicesByNode: map[string][]int{"g005": {0, 1, 2, 3, 4, 5, 6, 7}, "g023": {0, 1, 2, 3, 4, 5, 6, 7}},
+		allocByNode: map[string]nodeShare{"g005": {CPUs: 64, MemoryMB: 1900 * 1024}, "g023": {CPUs: 64, MemoryMB: 1900 * 1024}}}
+	telem := &NodeTelemetry{GPUUtils: map[int]float64{}, GPUMemUsedMB: map[int]int{}, GPUMemTotalMB: map[int]int{},
+		JobCPUCores: map[int]float64{349544: 64}, JobMemUsedMB: map[int]int{349544: 950 * 1024}}
+	for g := 0; g < 8; g++ {
+		telem.GPUUtils[g], telem.GPUMemUsedMB[g], telem.GPUMemTotalMB[g] = 100, 1000, 1000
+	}
+	node := Node{Name: "g005", State: "ALLOCATED", CPUTotal: 64, CPUAllocated: 64, GPUTotal: 8, GPUType: "h200", MemoryTotalMB: 2000 * 1024, MemoryAllocatedMB: 1900 * 1024}
+	out := strings.Join(nodeDetails(node, []Job{job}, 200, 100, 0, false, telem), "\n")
+	box := out[strings.Index(out, "349544 •"):]
+	// Every allocated GPU on this node is busy: 100% of 8, not 50% of 16.
+	for _, want := range []string{"100%  8/8", "64/64", "/" + gb(1900*1024) + "G"} {
+		if !strings.Contains(box, want) {
+			t.Errorf("job box missing %q:\n%s", want, box)
+		}
+	}
+	for _, unwanted := range []string{"/16", "/128", gb(3800*1024) + "G"} {
+		if strings.Contains(box, unwanted) {
+			t.Errorf("job box shows job-wide %q:\n%s", unwanted, box)
 		}
 	}
 }

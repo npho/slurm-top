@@ -1766,7 +1766,9 @@ func nodeDetails(n Node, jobs []Job, width, height, scroll int, color bool, tele
 	var runningJobs []Job
 	for _, job := range jobs {
 		if job.State == "RUNNING" && jobRunsOnNode(job.nodes, n.Name) {
-			runningJobs = append(runningJobs, job)
+			// Node details compare this node's telemetry with this node's share
+			// of the job, not the job's cluster-wide allocation.
+			runningJobs = append(runningJobs, job.onNode(n.Name))
 		}
 	}
 	colWidths := nodeGroupColumnWidths(n, runningJobs, t, color)

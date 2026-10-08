@@ -115,6 +115,9 @@ framebuffer VRAM usage, OS active CPU core count, and used host memory. Each
 running job on the node follows in a box labeled with its ID, user, and account,
 showing observed compute utilization across its allocated GPUs, allocated GPU
 VRAM consumption, cgroup active CPU core usage, and cgroup host memory usage.
+A job spanning several nodes is shown with only the CPUs, memory, and GPUs Slurm
+placed on the displayed node, against that node's usage; the `EFFICIENCY` score
+instead covers the job's whole allocation and usage across every node.
 Node-detail telemetry is a recent snapshot, not a job-lifetime figure: each
 value is the mean of the 5 most recent readings taken 30 s apart (the last
 2.5 minutes). If a refresh fails, the last reading for that node is kept.
