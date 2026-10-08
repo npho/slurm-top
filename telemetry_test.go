@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -896,233 +898,168 @@ func TestParseGresIndicesByNode(t *testing.T) {
 	}
 }
 
-func TestMedian(t *testing.T) {
-	if got := median(nil); got != 0 {
-		t.Errorf("median(nil) = %v, want 0", got)
+func TestMedianWindow(t *testing.T) {
+	tests := []struct {
+		window time.Duration
+		want   string
+	}{
+		{10 * time.Second, "[30s:30s]"},
+		{time.Hour, "[3600s:30s]"},
+		{34 * time.Hour, "[122400s:82s]"},
+		{7 * 24 * time.Hour, "[604800s:404s]"},
 	}
-	if got := median([]float64{}); got != 0 {
-		t.Errorf("median([]) = %v, want 0", got)
-	}
-	if got := median([]float64{42}); got != 42 {
-		t.Errorf("median([42]) = %v, want 42", got)
-	}
-	// Odd length (unsorted)
-	if got := median([]float64{10, 5, 20}); got != 10 {
-		t.Errorf("median([10, 5, 20]) = %v, want 10", got)
-	}
-	// Even length
-	if got := median([]float64{10, 20, 30, 40}); got != 25 {
-		t.Errorf("median([10, 20, 30, 40]) = %v, want 25", got)
+	for _, tt := range tests {
+		if got := medianWindow(tt.window); got != tt.want {
+			t.Errorf("medianWindow(%v) = %q, want %q", tt.window, got, tt.want)
+		}
 	}
 }
 
-func TestParsePrometheusRangeResponse(t *testing.T) {
-	raw := []byte(`{
-		"status": "success",
-		"data": {
-			"resultType": "matrix",
-			"result": [
-				{
-					"metric": {"gpu": "0", "Hostname": "node1"},
-					"values": [
-						[1700000000, "50.0"],
-						[1700000060, "70.0"],
-						[1700000120, "90.0"]
-					]
-				}
-			]
-		}
-	}`)
-	series, err := parsePrometheusRangeResponse(raw)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(series) != 1 {
-		t.Fatalf("expected 1 series, got %d", len(series))
-	}
-	if series[0].Metric["gpu"] != "0" || series[0].Metric["Hostname"] != "node1" {
-		t.Errorf("unexpected metric: %+v", series[0].Metric)
-	}
-	if len(series[0].Values) != 3 || len(series[0].Times) != 3 {
-		t.Fatalf("expected 3 values, got %d", len(series[0].Values))
-	}
-	if series[0].Values[0] != 50.0 || series[0].Values[1] != 70.0 || series[0].Values[2] != 90.0 {
-		t.Errorf("unexpected values: %v", series[0].Values)
-	}
-	if series[0].Times[0] != 1700000000 || series[0].Times[2] != 1700000120 {
-		t.Errorf("unexpected times: %v", series[0].Times)
+func TestEfficiencyExprs(t *testing.T) {
+	cpu := cgroupMedianExpr("rate(cgroup_cpu_total_seconds{}[2m])", []int{101, 102}, time.Hour)
+	wantCPU := `quantile_over_time(0.5, (sum by (jobid) (rate(cgroup_cpu_total_seconds{jobid=~"101|102",step=""}[2m])))[3600s:30s])`
+	if cpu != wantCPU {
+		t.Errorf("cgroup CPU expr =\n%s\nwant\n%s", cpu, wantCPU)
 	}
 
-	// Error response
-	errRaw := []byte(`{"status": "error", "error": "range error"}`)
-	if _, err := parsePrometheusRangeResponse(errRaw); err == nil {
-		t.Error("expected error for status=error")
+	util, mem := gpuMedianExprs(map[string][]int{"g014": {0, 1}, "g003": {5}}, time.Hour)
+	wantUtil := `quantile_over_time(0.5, (sum(DCGM_FI_DEV_GPU_UTIL{Hostname="g003",gpu=~"5"} or DCGM_FI_DEV_GPU_UTIL{Hostname="g014",gpu=~"0|1"}))[3600s:30s])`
+	if util != wantUtil {
+		t.Errorf("GPU util expr =\n%s\nwant\n%s", util, wantUtil)
 	}
+	used := `DCGM_FI_DEV_FB_USED{Hostname="g003",gpu=~"5"} or DCGM_FI_DEV_FB_USED{Hostname="g014",gpu=~"0|1"}`
+	free := `DCGM_FI_DEV_FB_FREE{Hostname="g003",gpu=~"5"} or DCGM_FI_DEV_FB_FREE{Hostname="g014",gpu=~"0|1"}`
+	wantMem := "quantile_over_time(0.5, (sum(" + used + ") / (sum(" + used + ") + sum(" + free + ")))[3600s:30s])"
+	if mem != wantMem {
+		t.Errorf("GPU mem expr =\n%s\nwant\n%s", mem, wantMem)
+	}
+}
+
+func promVector(series ...string) string {
+	return fmt.Sprintf(`{"status":"success","data":{"resultType":"vector","result":[%s]}}`, strings.Join(series, ","))
+}
+
+func promSample(labels string, at float64, v float64) string {
+	return fmt.Sprintf(`{"metric":{%s},"value":[%f,"%g"]}`, labels, at, v)
 }
 
 func TestFetchClusterJobEfficiencies(t *testing.T) {
-	now := float64(1700001000)
+	const gib = 1024 * 1024 * 1024
+	var mu sync.Mutex
+	var queries []string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query().Get("query")
-		var resultJSON string
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s, want POST", r.Method)
+		}
+		q := r.FormValue("query")
+		at, _ := strconv.ParseFloat(r.FormValue("time"), 64)
+		mu.Lock()
+		queries = append(queries, q)
+		mu.Unlock()
+		var body string
 		switch {
-		case strings.Contains(q, "DCGM_FI_DEV_GPU_UTIL"):
-			resultJSON = fmt.Sprintf(`{
-				"status": "success",
-				"data": {
-					"resultType": "matrix",
-					"result": [
-						{
-							"metric": {"Hostname": "node1", "gpu": "0"},
-							"values": [[%f, "40.0"], [%f, "60.0"], [%f, "80.0"]]
-						}
-					]
-				}
-			}`, now-100, now-50, now)
-		case strings.Contains(q, "DCGM_FI_DEV_FB_USED"):
-			resultJSON = fmt.Sprintf(`{
-				"status": "success",
-				"data": {
-					"resultType": "matrix",
-					"result": [
-						{
-							"metric": {"Hostname": "node1", "gpu": "0"},
-							"values": [[%f, "20000.0"], [%f, "40000.0"], [%f, "60000.0"]]
-						}
-					]
-				}
-			}`, now-100, now-50, now)
-		case strings.Contains(q, "DCGM_FI_DEV_FB_FREE"):
-			resultJSON = fmt.Sprintf(`{
-				"status": "success",
-				"data": {
-					"resultType": "matrix",
-					"result": [
-						{
-							"metric": {"Hostname": "node1", "gpu": "0"},
-							"values": [[%f, "60000.0"], [%f, "40000.0"], [%f, "20000.0"]]
-						}
-					]
-				}
-			}`, now-100, now-50, now)
-		case strings.Contains(q, "cpu"):
-			resultJSON = fmt.Sprintf(`{
-				"status": "success",
-				"data": {
-					"resultType": "matrix",
-					"result": [
-						{
-							"metric": {"slurmjobid": "101"},
-							"values": [[%f, "2.0"], [%f, "4.0"], [%f, "6.0"]]
-						},
-						{
-							"metric": {"slurmjobid": "102"},
-							"values": [[%f, "1.0"], [%f, "2.0"], [%f, "3.0"]]
-						}
-					]
-				}
-			}`, now-100, now-50, now, now-100, now-50, now)
-		case strings.Contains(q, "memory"):
-			// 8 GB in bytes = 8589934592
-			resultJSON = fmt.Sprintf(`{
-				"status": "success",
-				"data": {
-					"resultType": "matrix",
-					"result": [
-						{
-							"metric": {"slurmjobid": "101"},
-							"values": [[%f, "%d"], [%f, "%d"], [%f, "%d"]]
-						},
-						{
-							"metric": {"slurmjobid": "102"},
-							"values": [[%f, "%d"], [%f, "%d"], [%f, "%d"]]
-						}
-					]
-				}
-			}`, now-100, int64(4)*1024*1024*1024, now-50, int64(8)*1024*1024*1024, now, int64(12)*1024*1024*1024,
-				now-100, int64(2)*1024*1024*1024, now-50, int64(4)*1024*1024*1024, now, int64(6)*1024*1024*1024)
+		case strings.Contains(q, "cgroup_cpu_total_seconds"):
+			body = promVector(promSample(`"jobid":"101"`, at, 4), promSample(`"jobid":"102"`, at, 2), promSample(`"jobid":"103"`, at, 32))
+		case strings.Contains(q, "cgroup_memory_used_bytes"):
+			// Job 102 has no "used" series and falls back to RSS.
+			body = promVector(promSample(`"jobid":"101"`, at, 8*gib), promSample(`"jobid":"103"`, at, 800*gib))
+		case strings.Contains(q, "cgroup_memory_rss_bytes"):
+			body = promVector(promSample(`"jobid":"101"`, at, 1*gib), promSample(`"jobid":"102"`, at, 4*gib))
+		case strings.Contains(q, "DCGM_FI_DEV_GPU_UTIL") && strings.Contains(q, `Hostname="node1"`):
+			body = promVector(promSample("", at, 60))
+		case strings.Contains(q, "DCGM_FI_DEV_GPU_UTIL") && strings.Contains(q, `Hostname="g003"`):
+			body = promVector(promSample("", at, 400))
+		case strings.Contains(q, "DCGM_FI_DEV_FB_USED") && strings.Contains(q, `Hostname="node1"`):
+			body = promVector(promSample("", at, 0.5))
+		case strings.Contains(q, "DCGM_FI_DEV_FB_USED") && strings.Contains(q, `Hostname="g003"`):
+			body = promVector(promSample("", at, 0.25))
 		default:
-			resultJSON = `{"status": "success", "data": {"resultType": "matrix", "result": []}}`
+			body = promVector()
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, resultJSON)
+		fmt.Fprint(w, body)
 	}))
 	defer ts.Close()
 
-	cfg := PrometheusConfig{URL: ts.URL, Timeout: 2 * time.Second}
-	nodes := []Node{
-		{Name: "node1", GPUTotal: 1, GPUAllocated: 1},
-	}
+	start := time.Now().Add(-time.Hour)
 	jobs := []Job{
-		{
-			ID:             101,
-			State:          "RUNNING",
-			CPUs:           8,
-			GPUs:           1,
-			MemoryMB:       16384, // 16GB
-			nodes:          "node1",
-			gpuIndices:     []int{0},
-			ElapsedMinutes: 10,
-		},
-		{
-			ID:             102,
-			State:          "RUNNING",
-			CPUs:           4,
-			GPUs:           0,    // 0 GPUs
-			MemoryMB:       8192, // 8GB
-			nodes:          "node1",
-			ElapsedMinutes: 10,
-		},
+		{ID: 101, State: "RUNNING", CPUs: 8, GPUs: 1, MemoryMB: 16384, nodes: "node1",
+			gpuIndicesByNode: map[string][]int{"node1": {0}}, startTime: start},
+		{ID: 102, State: "RUNNING", CPUs: 4, MemoryMB: 8192, nodes: "node1", startTime: start},
+		{ID: 103, State: "RUNNING", CPUs: 64, GPUs: 8, MemoryMB: 1600 * 1024, nodes: "g[003,014]",
+			gpuIndicesByNode: parseGresIndicesByNode("g[003,014]", []string{"gpu:h200:4(IDX:1-2,5,7)", "gpu:h200:4(IDX:0-1,4-5)"}), startTime: start},
+		{ID: 104, State: "PENDING", CPUs: 4, MemoryMB: 4096},
 	}
 
-	effs, err := fetchClusterJobEfficiencies(context.Background(), cfg, jobs, nodes)
+	effs, err := fetchClusterJobEfficiencies(context.Background(), PrometheusConfig{URL: ts.URL}, jobs)
 	if err != nil {
 		t.Fatalf("fetchClusterJobEfficiencies error: %v", err)
 	}
-	if len(effs) != 2 {
-		t.Fatalf("expected 2 job efficiencies, got %d", len(effs))
+	want := map[int]JobEfficiency{
+		// (0.60 GPU + 0.50 GPU mem + 4/8 CPU + 8/16 GiB) / 4
+		101: {JobID: 101, Score: 0.525, GPUUtil: 0.6, GPUMemUtil: 0.5, CPUUtil: 0.5, MemUtil: 0.5},
+		// No GPU terms; memory uses the RSS fallback: (2/4 + 4/8) / 2
+		102: {JobID: 102, Score: 0.5, CPUUtil: 0.5, MemUtil: 0.5},
+		// 400% summed over 8 GPUs on two nodes: (0.50 + 0.25 + 32/64 + 800/1600) / 4
+		103: {JobID: 103, Score: 0.4375, GPUUtil: 0.5, GPUMemUtil: 0.25, CPUUtil: 0.5, MemUtil: 0.5},
+	}
+	if len(effs) != len(want) {
+		t.Fatalf("got %d efficiencies, want %d (running jobs only): %+v", len(effs), len(want), effs)
+	}
+	for id, w := range want {
+		g := effs[id]
+		for _, c := range []struct {
+			name      string
+			got, want float64
+		}{{"Score", g.Score, w.Score}, {"GPUUtil", g.GPUUtil, w.GPUUtil}, {"GPUMemUtil", g.GPUMemUtil, w.GPUMemUtil}, {"CPUUtil", g.CPUUtil, w.CPUUtil}, {"MemUtil", g.MemUtil, w.MemUtil}} {
+			if mathAbs(c.got-c.want) > 1e-9 {
+				t.Errorf("job %d %s = %v, want %v", id, c.name, c.got, c.want)
+			}
+		}
 	}
 
-	// Job 101:
-	// GPU Util median = 60.0% -> 60.0 / 100.0 = 0.60
-	// GPU Mem: FB_USED median = 40000, Total = 20000 + 60000 = 80000. Util = 40000/80000 = 0.50
-	// CPU: median = 4.0 cores / 8 cores = 0.50
-	// Mem: median = 8 GB / 16 GB = 0.50
-	// Score: (0.60 + 0.50 + 0.50 + 0.50) / 4 = 2.10 / 4 = 0.525
-	e101 := effs[101]
-	if mathAbs(e101.GPUUtil-0.60) > 0.01 {
-		t.Errorf("job 101 GPUUtil = %v, want ~0.60", e101.GPUUtil)
+	// Three batched cgroup queries plus two DCGM queries for each GPU job.
+	if len(queries) != 7 {
+		t.Errorf("issued %d queries, want 7: %q", len(queries), queries)
 	}
-	if mathAbs(e101.GPUMemUtil-0.50) > 0.01 {
-		t.Errorf("job 101 GPUMemUtil = %v, want ~0.50", e101.GPUMemUtil)
+	for _, q := range queries {
+		if strings.Contains(q, "cgroup_") && !strings.Contains(q, `step=""`) {
+			t.Errorf("cgroup query does not restrict to job-level series: %s", q)
+		}
+		if strings.Contains(q, `Hostname="g003"`) && (!strings.Contains(q, `Hostname="g003",gpu=~"1|2|5|7"`) || !strings.Contains(q, `Hostname="g014",gpu=~"0|1|4|5"`)) {
+			t.Errorf("multi-node GPU query does not use per-node indices: %s", q)
+		}
 	}
-	if mathAbs(e101.CPUUtil-0.50) > 0.01 {
-		t.Errorf("job 101 CPUUtil = %v, want ~0.50", e101.CPUUtil)
-	}
-	if mathAbs(e101.MemUtil-0.50) > 0.01 {
-		t.Errorf("job 101 MemUtil = %v, want ~0.50", e101.MemUtil)
-	}
-	if mathAbs(e101.Score-0.525) > 0.01 {
-		t.Errorf("job 101 Score = %v, want ~0.525", e101.Score)
-	}
+}
 
-	// Job 102 (0 GPUs):
-	// GPU and GPU Mem are weighted 0 (unrequested).
-	// CPU: median = 2.0 cores / 4 cores = 0.50
-	// Mem: median = 4 GB / 8 GB = 0.50
-	// Score: (0.50 + 0.50) / 2 = 1.0 / 2 = 0.50
-	e102 := effs[102]
-	if e102.GPUUtil != 0.0 || e102.GPUMemUtil != 0.0 {
-		t.Errorf("job 102 GPU utilization should be 0.0, got gpu=%v gpumem=%v", e102.GPUUtil, e102.GPUMemUtil)
+func TestFetchClusterJobEfficienciesQueryError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.FormValue("query"), "cgroup_cpu_total_seconds") {
+			http.Error(w, "overloaded", http.StatusServiceUnavailable)
+			return
+		}
+		fmt.Fprint(w, promVector())
+	}))
+	defer ts.Close()
+
+	jobs := []Job{{ID: 1, State: "RUNNING", CPUs: 1, MemoryMB: 1024, nodes: "n001", startTime: time.Now().Add(-time.Hour)}}
+	effs, err := fetchClusterJobEfficiencies(context.Background(), PrometheusConfig{URL: ts.URL}, jobs)
+	if err == nil || !strings.Contains(err.Error(), "503") {
+		t.Fatalf("error = %v, want an HTTP 503 error rather than silent zero scores", err)
 	}
-	if mathAbs(e102.CPUUtil-0.50) > 0.01 {
-		t.Errorf("job 102 CPUUtil = %v, want ~0.50", e102.CPUUtil)
+	if effs != nil {
+		t.Errorf("efficiencies = %+v, want nil on query failure", effs)
 	}
-	if mathAbs(e102.MemUtil-0.50) > 0.01 {
-		t.Errorf("job 102 MemUtil = %v, want ~0.50", e102.MemUtil)
+}
+
+func TestFetchClusterJobEfficienciesDisabled(t *testing.T) {
+	jobs := []Job{{ID: 1, State: "RUNNING", CPUs: 1}, {ID: 2, State: "PENDING", CPUs: 1}}
+	effs, err := fetchClusterJobEfficiencies(context.Background(), PrometheusConfig{Disabled: true, URL: "http://unused"}, jobs)
+	if err != nil {
+		t.Fatalf("error = %v", err)
 	}
-	if mathAbs(e102.Score-0.50) > 0.01 {
-		t.Errorf("job 102 Score = %v, want ~0.50", e102.Score)
+	if want := map[int]JobEfficiency{1: {JobID: 1}}; !reflect.DeepEqual(effs, want) {
+		t.Errorf("efficiencies = %+v, want %+v", effs, want)
 	}
 }
 

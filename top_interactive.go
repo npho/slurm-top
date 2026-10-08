@@ -1942,7 +1942,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 	effCalculating := false
 	var effLastAttempt time.Time
 
-	triggerEffCalc := func(jobs []Job, nodes []Node) {
+	triggerEffCalc := func(jobs []Job) {
 		if effCalculating || activePromCfg.Disabled || activePromCfg.URL == "" || len(jobs) == 0 {
 			return
 		}
@@ -1950,13 +1950,11 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 		effLastAttempt = time.Now()
 		jobsCopy := make([]Job, len(jobs))
 		copy(jobsCopy, jobs)
-		nodesCopy := make([]Node, len(nodes))
-		copy(nodesCopy, nodes)
 
 		go func() {
 			effCtx, effCancel := context.WithTimeout(root, 60*time.Second)
 			defer effCancel()
-			effs, err := fetchClusterJobEfficiencies(effCtx, activePromCfg, jobsCopy, nodesCopy)
+			effs, err := fetchClusterJobEfficiencies(effCtx, activePromCfg, jobsCopy)
 			if err != nil || effs == nil {
 				select {
 				case effChan <- nil:
@@ -1972,7 +1970,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 	}
 
 	// Automatically start calculating the efficiency table upon program start in parallel
-	triggerEffCalc(s.Jobs, s.nodes)
+	triggerEffCalc(s.Jobs)
 
 	efficiencySelected, efficiencyScroll := 0, 0
 	width, height, menuStartY, headerY, rows := 80, 24, 2, 5, 1
@@ -2002,7 +2000,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 		if pane == "efficiency" && len(s.Jobs) > 0 {
 			if !activePromCfg.Disabled && activePromCfg.URL != "" {
 				if cachedJobEfficiencies == nil && !effCalculating && time.Since(effLastAttempt) > 10*time.Second {
-					triggerEffCalc(s.Jobs, s.nodes)
+					triggerEffCalc(s.Jobs)
 				}
 			}
 		}
@@ -2516,7 +2514,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				}
 				lastTelemTime = time.Time{}
 				if !effCalculating {
-					triggerEffCalc(s.Jobs, s.nodes)
+					triggerEffCalc(s.Jobs)
 				}
 			case "click":
 				if ev.y >= menuStartY && ev.y < menuStartY+len(viewMenu(paneMenuLabel(pane))) {
@@ -2652,7 +2650,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				}
 			}
 			// Once a calculation completes, restart the calculation process serially
-			triggerEffCalc(s.Jobs, s.nodes)
+			triggerEffCalc(s.Jobs)
 		case <-ticker.C:
 			id := ""
 			if selected < len(ids) {
@@ -2669,7 +2667,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				message = ""
 				lastTelemTime = time.Time{}
 				if !effCalculating && time.Since(effLastAttempt) >= 2*time.Second {
-					triggerEffCalc(s.Jobs, s.nodes)
+					triggerEffCalc(s.Jobs)
 				}
 				if pane == "account" || pane == "account-jobs" {
 					tableAccount := ""

@@ -130,8 +130,14 @@ until the new calculation is ready so pane navigation remains instantaneous. The
 score weights GPU compute
 duty cycle, GPU VRAM usage, CPU core usage, and host memory usage equally across
 requested resource types, normalized against Slurm requested/allocated resources.
-Each resource utilization takes the median of Prometheus telemetry sample points
-over the entire life of the job back to its start time. When a job does not request
+Each resource utilization is the median over the job's lifetime, computed by
+Prometheus (`quantile_over_time`) from the job's start time. Before taking the
+median, the job's samples are combined at each instant: job-level cgroup series
+(excluding per-step and per-task series) are summed across all of the job's
+nodes, and DCGM series are summed across exactly the GPUs Slurm assigned on each
+node. GPU VRAM usage is measured against the framebuffer of those GPUs. If any
+Prometheus query fails or exceeds the 30-second calculation budget, the previous
+cached table is kept rather than showing zero scores. When a job does not request
 GPUs (0 GPUs allocated), GPU compute and GPU memory are weighted as 0 so they do
 not count towards the efficiency score calculation (which evaluates requested CPU
 and host memory equally). The table defaults to sorting by least efficient first
