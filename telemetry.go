@@ -228,6 +228,20 @@ func (cfg PrometheusConfig) queryExpr(ctx context.Context, client *http.Client, 
 	return parsePrometheusResponse(data)
 }
 
+const (
+	// Node details show the mean of the most recent nodeTelemetryReadings
+	// readings, nodeTelemetryStep apart, rather than one instantaneous sample.
+	nodeTelemetryReadings = 5
+	nodeTelemetryStep     = 30 * time.Second
+)
+
+// recentMeanExpr averages expr over its most recent nodeTelemetryReadings
+// subquery samples.
+func recentMeanExpr(expr string) string {
+	step := int64(nodeTelemetryStep / time.Second)
+	return fmt.Sprintf("avg_over_time((%s)[%ds:%ds])", expr, step*nodeTelemetryReadings, step)
+}
+
 func fetchNodeTelemetry(ctx context.Context, cfg PrometheusConfig, nodeName string) (*NodeTelemetry, error) {
 	if cfg.Disabled || cfg.URL == "" || nodeName == "" {
 		return nil, nil
@@ -420,18 +434,34 @@ func fetchNodeTelemetry(ctx context.Context, cfg PrometheusConfig, nodeName stri
 		},
 	}
 
+	var failed int
+	var firstErr error
 	for _, q := range queries {
 		wg.Add(1)
 		go func(expr string, h func([]promSeries)) {
 			defer wg.Done()
-			series, err := cfg.queryExpr(ctx, client, expr)
-			if err == nil && len(series) > 0 {
+			series, err := cfg.queryExpr(ctx, client, recentMeanExpr(expr))
+			if err != nil {
+				mu.Lock()
+				failed++
+				if firstErr == nil {
+					firstErr = fmt.Errorf("prometheus query %q: %w", expr, err)
+				}
+				mu.Unlock()
+				return
+			}
+			if len(series) > 0 {
 				h(series)
 			}
 		}(q.expr, q.handler)
 	}
 
 	wg.Wait()
+	// Partial telemetry is still useful, but if nothing answered, report the
+	// failure so callers can keep their last good reading instead of blanking.
+	if failed == len(queries) {
+		return nil, firstErr
+	}
 	return telem, nil
 }
 
@@ -455,6 +485,10 @@ const (
 	efficiencyJobBatch = 200
 	// efficiencyParallel caps concurrent per-job DCGM queries.
 	efficiencyParallel = 8
+	// efficiencyRefreshInterval spaces background efficiency passes. Lifetime
+	// medians move slowly, and back-to-back passes saturate Prometheus and
+	// starve the short node-detail queries.
+	efficiencyRefreshInterval = time.Minute
 )
 
 // queryExprAt evaluates an instant query at a fixed time. It uses a POST form

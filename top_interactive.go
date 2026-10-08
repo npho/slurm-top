@@ -1447,7 +1447,25 @@ func nodeUtilizationBars(n Node, _ int, color bool, args ...any) []string {
 	return nodeBarBox("UTILIZED", append(contents, cpu, mem))
 }
 
-func jobColNaturalWidths(job Job, t *NodeTelemetry) [4]int {
+// jobGPUIndicesOnNode returns the GPU indices Slurm assigned to job on
+// nodeName. The same index names different devices on different nodes, so a
+// multi-node job's merged index list is used only when the per-node pairing
+// is unknown.
+func jobGPUIndicesOnNode(job Job, nodeName string) []int {
+	if idx, ok := job.gpuIndicesByNode[nodeName]; ok {
+		return idx
+	}
+	if len(job.gpuIndices) > 0 {
+		return job.gpuIndices
+	}
+	indices := make([]int, job.GPUs)
+	for i := range indices {
+		indices[i] = i
+	}
+	return indices
+}
+
+func jobColNaturalWidths(job Job, nodeName string, t *NodeTelemetry) [4]int {
 	gpuTot := strconv.Itoa(job.GPUs)
 	w0 := 4 + 2 + len(gpuTot) + 1 + len(gpuTot)
 	if w0 < 9 {
@@ -1459,12 +1477,7 @@ func jobColNaturalWidths(job Job, t *NodeTelemetry) [4]int {
 		gpuMemTotal = 0
 	} else if t != nil && job.GPUs > 0 {
 		sumMemTotal := 0
-		indices := job.gpuIndices
-		if len(indices) == 0 {
-			for i := 0; i < job.GPUs; i++ {
-				indices = append(indices, i)
-			}
-		}
+		indices := jobGPUIndicesOnNode(job, nodeName)
 		for _, idx := range indices {
 			tot := t.GPUMemTotalMB[idx]
 			if tot > 0 {
@@ -1529,7 +1542,7 @@ func nodeJobUtilizationBars(job Job, color bool, args ...any) []string {
 		}
 	}
 	if !hasColWidths {
-		natural := jobColNaturalWidths(job, t)
+		natural := jobColNaturalWidths(job, n.Name, t)
 		for k := 0; k < 4; k++ {
 			colWidths[k] = max(colWidths[k], natural[k])
 		}
@@ -1548,12 +1561,7 @@ func nodeJobUtilizationBars(job Job, color bool, args ...any) []string {
 		zeroPct := 0.0
 		customGpuPct = &zeroPct
 	} else if t != nil && job.GPUs > 0 {
-		indices := job.gpuIndices
-		if len(indices) == 0 {
-			for i := 0; i < job.GPUs; i++ {
-				indices = append(indices, i)
-			}
-		}
+		indices := jobGPUIndicesOnNode(job, n.Name)
 		sumUtil := 0.0
 		sumMemUsed := 0
 		sumMemTotal := 0
@@ -1732,7 +1740,7 @@ func nodeGroupColumnWidths(n Node, runningJobs []Job, t *NodeTelemetry, color bo
 	colWidths[3] = max(colWidths[3], visibleWidth(utilMEM.status))
 
 	for _, job := range runningJobs {
-		jw := jobColNaturalWidths(job, t)
+		jw := jobColNaturalWidths(job, n.Name, t)
 		colWidths[0] = max(colWidths[0], gpuLabelWidth+jw[0])
 		for k := 1; k < 4; k++ {
 			colWidths[k] = max(colWidths[k], jw[k])
@@ -2196,9 +2204,13 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					if !activePromCfg.Disabled && activePromCfg.URL != "" {
 						if selNode.Name != lastTelemNode || time.Since(lastTelemTime) > 3*time.Second {
 							telemCtx, telemCancel := context.WithTimeout(root, 2*time.Second)
-							t, _ := fetchNodeTelemetry(telemCtx, activePromCfg, selNode.Name)
+							t, err := fetchNodeTelemetry(telemCtx, activePromCfg, selNode.Name)
 							telemCancel()
-							cachedTelem = t
+							// On failure keep the last reading for this node rather
+							// than blanking every bar to a ? placeholder.
+							if err == nil || selNode.Name != lastTelemNode {
+								cachedTelem = t
+							}
 							lastTelemNode = selNode.Name
 							lastTelemTime = time.Now()
 						}
@@ -2649,8 +2661,6 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 					return err
 				}
 			}
-			// Once a calculation completes, restart the calculation process serially
-			triggerEffCalc(s.Jobs)
 		case <-ticker.C:
 			id := ""
 			if selected < len(ids) {
@@ -2666,7 +2676,7 @@ func runTopUI(in, out *os.File, interval, timeout time.Duration, initialSort str
 				s = updated
 				message = ""
 				lastTelemTime = time.Time{}
-				if !effCalculating && time.Since(effLastAttempt) >= 2*time.Second {
+				if !effCalculating && time.Since(effLastAttempt) >= efficiencyRefreshInterval {
 					triggerEffCalc(s.Jobs)
 				}
 				if pane == "account" || pane == "account-jobs" {

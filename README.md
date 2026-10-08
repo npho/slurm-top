@@ -115,6 +115,9 @@ framebuffer VRAM usage, OS active CPU core count, and used host memory. Each
 running job on the node follows in a box labeled with its ID, user, and account,
 showing observed compute utilization across its allocated GPUs, allocated GPU
 VRAM consumption, cgroup active CPU core usage, and cgroup host memory usage.
+Node-detail telemetry is a recent snapshot, not a job-lifetime figure: each
+value is the mean of the 5 most recent readings taken 30 s apart (the last
+2.5 minutes). If a refresh fails, the last reading for that node is kept.
 If Prometheus is unavailable or disabled with `--no-prometheus`, unmeasured
 numerators display `?` placeholders. Jobs with 0 GPUs allocated render 0% empty
 bars and 0/0 / 0/0G without `?` placeholders. All columns (GPU, GPU MEM, CPU,
@@ -123,8 +126,8 @@ and H200-MIG GPU allocations are shown separately; generic GPU allocations remai
 generically labeled. Press **Escape** to return to the grid; the mouse wheel
 scrolls the details. In `EFFICIENCY`, a table ranks all currently running jobs
 across the cluster by resource efficiency score. The program automatically begins
-calculating telemetry in the background on startup and runs continuous serial
-updates (restarting the next calculation as soon as each one completes). The
+calculating telemetry in the background on startup and recalculates it serially
+at most once a minute, so lifetime queries do not starve node-detail lookups. The
 table is maintained in a hot in-memory cache, displaying the last cached version
 until the new calculation is ready so pane navigation remains instantaneous. The
 score weights GPU compute

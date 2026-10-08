@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -150,7 +151,11 @@ func TestNodeTelemetryCalculations(t *testing.T) {
 
 func TestFetchNodeTelemetryWithMockServer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query().Get("query")
+		wrapped := r.URL.Query().Get("query")
+		q, ok := strings.CutPrefix(wrapped, "avg_over_time((")
+		if !ok || !strings.HasSuffix(q, ")[150s:30s])") {
+			t.Errorf("query not averaged over recent readings: %s", wrapped)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case strings.HasPrefix(q, "DCGM_FI_DEV_GPU_UTIL"):
@@ -1068,4 +1073,68 @@ func mathAbs(x float64) float64 {
 		return -x
 	}
 	return x
+}
+
+func TestRecentMeanExpr(t *testing.T) {
+	got := recentMeanExpr(`rate(cgroup_cpu_total_seconds{instance=~"g001.*", step=""}[2m])`)
+	want := `avg_over_time((rate(cgroup_cpu_total_seconds{instance=~"g001.*", step=""}[2m]))[150s:30s])`
+	if got != want {
+		t.Errorf("recentMeanExpr = %s, want %s", got, want)
+	}
+}
+
+func TestFetchNodeTelemetryReportsTotalFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "busy", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	telem, err := fetchNodeTelemetry(context.Background(), PrometheusConfig{URL: server.URL}, "testnode")
+	if err == nil {
+		t.Fatal("expected an error when every query fails")
+	}
+	if telem != nil {
+		t.Errorf("expected nil telemetry on total failure, got %+v", telem)
+	}
+}
+
+func TestJobGPUIndicesOnNode(t *testing.T) {
+	multi := Job{GPUs: 8, gpuIndices: []int{0, 1, 2, 4, 5, 7}, gpuIndicesByNode: map[string][]int{
+		"g003": {1, 2, 5, 7},
+		"g014": {0, 1, 4, 5},
+	}}
+	tests := []struct {
+		name string
+		job  Job
+		node string
+		want []int
+	}{
+		{"per-node pairing", multi, "g014", []int{0, 1, 4, 5}},
+		{"unknown pairing falls back to merged", Job{GPUs: 2, gpuIndices: []int{3, 6}}, "g001", []int{3, 6}},
+		{"no indices assumes first GPUs", Job{GPUs: 2}, "", []int{0, 1}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := jobGPUIndicesOnNode(tt.job, tt.node); !slices.Equal(got, tt.want) {
+				t.Errorf("jobGPUIndicesOnNode = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNodeJobUtilizationBarsUsesNodeGPUs(t *testing.T) {
+	job := Job{ID: 7, User: "u", Account: "a", CPUs: 4, GPUs: 2, MemoryMB: 8192,
+		gpuIndices: []int{0, 1, 2, 3}, gpuIndicesByNode: map[string][]int{"g001": {0, 1}, "g002": {2, 3}}}
+	telem := &NodeTelemetry{
+		GPUUtils:      map[int]float64{0: 100, 1: 100, 2: 25, 3: 25},
+		GPUMemUsedMB:  map[int]int{0: 81920, 1: 81920, 2: 10240, 3: 10240},
+		GPUMemTotalMB: map[int]int{0: 81920, 1: 81920, 2: 81920, 3: 81920},
+	}
+	// Merged indices would count g001's GPUs too: 250% over 2 GPUs and 344G.
+	got := strings.Join(nodeJobUtilizationBars(job, false, Node{Name: "g002"}, telem), "\n")
+	for _, want := range []string{"25%", "21/172G"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected g002's own GPUs (2,3) to show %q, got:\n%s", want, got)
+		}
+	}
 }

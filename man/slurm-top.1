@@ -83,6 +83,8 @@ active GPU count, total GPU VRAM usage from NVIDIA DCGM, active CPU core count,
 and used host memory. Each running job on the node follows in a box labeled with
 its ID, user, and account, showing observed compute duty cycle across allocated GPUs,
 allocated GPU VRAM consumption, cgroup active CPU core usage, and cgroup host memory usage.
+Node-detail telemetry is the mean of the 5 most recent readings taken 30 s apart, not a
+job-lifetime figure; if a refresh fails, the last reading for that node is kept.
 If Prometheus is disabled with --no-prometheus or unconfigured, unmeasured numerators
 display as ? placeholders. Jobs with 0 GPUs allocated render 0% empty bars and 0/0 / 0/0G
 without ? placeholders. Status bars in each column have uniform length across all groups.
@@ -90,8 +92,8 @@ H200 and H200-MIG allocations remain separate; generic GPUs remain generically l
 Escape returns to the grid, and the mouse wheel scrolls the details.
 In EFFICIENCY, a table ranks all currently running jobs across the cluster by overall
 resource efficiency score. Telemetry is automatically queried in the background on startup
-and runs continuous serial updates (restarting each calculation immediately after the prior
-one finishes), maintaining a hot in-memory cache while keeping navigation instantaneous.
+and recalculated serially at most once a minute, so lifetime queries do not starve
+node-detail lookups, maintaining a hot in-memory cache while keeping navigation instantaneous.
 The score weights GPU compute duty cycle,
 GPU VRAM usage, CPU core usage, and host memory usage equally across requested resource types,
 normalized against Slurm requested/allocated resources. Each resource utilization is the median over the job's lifetime, computed by Prometheus
