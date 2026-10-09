@@ -650,6 +650,18 @@ func parseNodeComponent(name string) nodeComponent {
 	}
 }
 
+// sameRangeWidth reports whether next can extend a range that starts at
+// start. Padded names need equal widths, but unpadded names can cross a digit
+// boundary, as Slurm condenses a8,a9,a10 to a[8-10].
+func sameRangeWidth(start, next nodeComponent) bool {
+	return next.width == start.width ||
+		(!zeroPadded(start) && !zeroPadded(next) && next.width > start.width)
+}
+
+func zeroPadded(c nodeComponent) bool {
+	return c.width > len(strconv.Itoa(c.num))
+}
+
 // expandNodeList expands a Slurm hostlist such as "g[001-003],gpu[1-2]-ib"
 // into individual node names, following Slurm's hostlist rules.
 func expandNodeList(raw string) []string {
@@ -806,7 +818,7 @@ func condenseNodes(names []string) string {
 		j := i + 1
 		for j < len(items) {
 			next := items[j]
-			if next.hasNum && next.prefix == curr.prefix && next.suffix == curr.suffix && next.width == curr.width && next.num == endNum+1 {
+			if next.hasNum && next.prefix == curr.prefix && next.suffix == curr.suffix && sameRangeWidth(curr, next) && next.num == endNum+1 {
 				endNum = next.num
 				j++
 			} else {

@@ -468,6 +468,36 @@ func TestCondenseNodes(t *testing.T) {
 			want:  "gpu[01-03]-ib",
 		},
 		{
+			name:  "unpadded run crosses digit width",
+			nodes: []string{"a8", "a9", "a10"},
+			want:  "a[8-10]",
+		},
+		{
+			name:  "unpadded hostlist round-trips",
+			nodes: []string{"a[98-100]"},
+			want:  "a[98-100]",
+		},
+		{
+			name:  "padded hostlist round-trips",
+			nodes: []string{"a[08-10]"},
+			want:  "a[08-10]",
+		},
+		{
+			name:  "padded run crossing magnitude",
+			nodes: []string{"g098", "g099", "g100"},
+			want:  "g[098-100]",
+		},
+		{
+			name:  "padded and unpadded names stay distinct",
+			nodes: []string{"a08", "a9", "a10"},
+			want:  "a08, a[9-10]",
+		},
+		{
+			name:  "padded name does not join unpadded run",
+			nodes: []string{"a9", "a10", "a011"},
+			want:  "a[9-10], a011",
+		},
+		{
 			name:  "empty",
 			nodes: []string{},
 			want:  "none",
