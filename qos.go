@@ -650,56 +650,96 @@ func parseNodeComponent(name string) nodeComponent {
 	}
 }
 
+// expandNodeList expands a Slurm hostlist such as "g[001-003],gpu[1-2]-ib"
+// into individual node names, following Slurm's hostlist rules.
 func expandNodeList(raw string) []string {
 	var result []string
-	for len(raw) > 0 {
-		part, rest, found := strings.Cut(raw, ",")
-		if open := strings.IndexByte(part, '['); open >= 0 {
-			if close := strings.IndexByte(raw[open:], ']'); close >= 0 {
-				end := open + close
-				part = raw[:end+1]
-				if end+1 < len(raw) && raw[end+1] == ',' {
-					rest = raw[end+2:]
-				} else {
-					rest = raw[end+1:]
-				}
-				found = true
-			}
-		}
-		part = strings.TrimSpace(part)
-		if open := strings.IndexByte(part, '['); open >= 0 && strings.HasSuffix(part, "]") {
-			prefix := part[:open]
-			inside := part[open+1 : len(part)-1]
-			for _, span := range strings.Split(inside, ",") {
-				first, last, ranged := strings.Cut(span, "-")
-				first = strings.TrimSpace(first)
-				last = strings.TrimSpace(last)
-				if !ranged {
-					result = append(result, prefix+first)
-				} else {
-					start, e1 := strconv.Atoi(first)
-					end, e2 := strconv.Atoi(last)
-					if e1 == nil && e2 == nil && end >= start {
-						// Slurm zero-pads a range to the width of its lower
-						// bound: a[8-10] is a8,a9,a10 but a[08-10] is a08..a10.
-						padding := len(first)
-						for n := start; n <= end; n++ {
-							result = append(result, prefix+fmt.Sprintf("%0*d", padding, n))
-						}
-					} else {
-						result = append(result, part)
-					}
-				}
-			}
-		} else if part != "" {
-			result = append(result, part)
-		}
-		if !found {
-			break
-		}
-		raw = rest
+	for _, expr := range splitHostlist(raw) {
+		result = append(result, expandHostExpr(strings.TrimSpace(expr))...)
 	}
 	return result
+}
+
+// splitHostlist splits a hostlist on the commas that are outside brackets.
+func splitHostlist(raw string) []string {
+	var parts []string
+	depth, start := 0, 0
+	for i := 0; i < len(raw); i++ {
+		switch raw[i] {
+		case '[':
+			depth++
+		case ']':
+			depth = max(0, depth-1)
+		case ',':
+			if depth == 0 {
+				parts = append(parts, raw[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(parts, raw[start:])
+}
+
+// expandHostExpr expands one host expression. Text after a bracket is kept,
+// and multiple brackets expand as a cross product (a[1-2]b[3-4] is a1b3,
+// a1b4, a2b3, a2b4). A malformed expression is returned unchanged.
+func expandHostExpr(expr string) []string {
+	if expr == "" {
+		return nil
+	}
+	open := strings.IndexByte(expr, '[')
+	if open < 0 {
+		return []string{expr}
+	}
+	close := strings.IndexByte(expr[open:], ']')
+	if close < 0 {
+		return []string{expr}
+	}
+	close += open
+	values, ok := expandRangeSet(expr[open+1 : close])
+	if !ok {
+		return []string{expr}
+	}
+	suffixes := []string{""}
+	if rest := expr[close+1:]; rest != "" {
+		suffixes = expandHostExpr(rest)
+	}
+	prefix := expr[:open]
+	result := make([]string, 0, len(values)*len(suffixes))
+	for _, v := range values {
+		for _, suffix := range suffixes {
+			result = append(result, prefix+v+suffix)
+		}
+	}
+	return result
+}
+
+// expandRangeSet expands the inside of a hostlist bracket, such as
+// "1-3,08-10". Slurm zero-pads a range to the width of its lower bound:
+// a[8-10] is a8,a9,a10 but a[08-10] is a08,a09,a10.
+func expandRangeSet(inside string) ([]string, bool) {
+	var values []string
+	for _, span := range strings.Split(inside, ",") {
+		first, last, ranged := strings.Cut(span, "-")
+		first = strings.TrimSpace(first)
+		if !ranged {
+			if first == "" {
+				return nil, false
+			}
+			values = append(values, first)
+			continue
+		}
+		last = strings.TrimSpace(last)
+		start, e1 := strconv.Atoi(first)
+		end, e2 := strconv.Atoi(last)
+		if e1 != nil || e2 != nil || start < 0 || end < start {
+			return nil, false
+		}
+		for n := start; n <= end; n++ {
+			values = append(values, fmt.Sprintf("%0*d", len(first), n))
+		}
+	}
+	return values, true
 }
 
 func condenseNodes(names []string) string {

@@ -386,6 +386,15 @@ func TestExpandNodeList(t *testing.T) {
 		{"padded range crosses three digits", "g[098-102]", []string{"g098", "g099", "g100", "g101", "g102"}},
 		{"mixed spans", "a[1-3,8-10]", []string{"a1", "a2", "a3", "a8", "a9", "a10"}},
 		{"multiple expressions", "a[8-10],b[1-2]", []string{"a8", "a9", "a10", "b1", "b2"}},
+		{"suffix after bracket", "gpu[01-02]-ib", []string{"gpu01-ib", "gpu02-ib"}},
+		{"suffix then another expression", "gpu[1-2]-ib,n3", []string{"gpu1-ib", "gpu2-ib", "n3"}},
+		{"multiple brackets", "a[1-2]b[3-4]", []string{"a1b3", "a1b4", "a2b3", "a2b4"}},
+		{"single bracketed value", "a[5]", []string{"a5"}},
+		{"empty expressions skipped", "a[1-2],,b3", []string{"a1", "a2", "b3"}},
+		{"whitespace trimmed", " g001 , g[002-003] ", []string{"g001", "g002", "g003"}},
+		{"invalid range kept verbatim", "a[x-y]", []string{"a[x-y]"}},
+		{"descending range kept verbatim", "a[3-1]", []string{"a[3-1]"}},
+		{"unclosed bracket kept verbatim", "a[1-2", []string{"a[1-2"}},
 		{"empty", "", nil},
 	}
 	for _, tt := range tests {
@@ -452,6 +461,11 @@ func TestCondenseNodes(t *testing.T) {
 			name:  "hostlist input expanded and recondensed",
 			nodes: []string{"g[022-023]", "g024"},
 			want:  "g[022-024]",
+		},
+		{
+			name:  "hostlist with suffix expanded and recondensed",
+			nodes: []string{"gpu[01-02]-ib", "gpu03-ib"},
+			want:  "gpu[01-03]-ib",
 		},
 		{
 			name:  "empty",
