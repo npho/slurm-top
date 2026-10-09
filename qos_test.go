@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -368,6 +369,31 @@ debug|100|00:00:00|cluster||cluster|||1.000000|cpu=32,mem=128G|||4|10|02:00:00|c
 	}
 	if normal.GrpTRES != "" {
 		t.Errorf("normal.GrpTRES = %q, want empty", normal.GrpTRES)
+	}
+}
+
+func TestExpandNodeList(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{"single node", "g004", []string{"g004"}},
+		{"padded range", "g[001-003]", []string{"g001", "g002", "g003"}},
+		{"unpadded range crosses digit width", "a[8-10]", []string{"a8", "a9", "a10"}},
+		{"padded range crosses digit width", "a[08-10]", []string{"a08", "a09", "a10"}},
+		{"lower bound sets width", "a[8-010]", []string{"a8", "a9", "a10"}},
+		{"padded range crosses three digits", "g[098-102]", []string{"g098", "g099", "g100", "g101", "g102"}},
+		{"mixed spans", "a[1-3,8-10]", []string{"a1", "a2", "a3", "a8", "a9", "a10"}},
+		{"multiple expressions", "a[8-10],b[1-2]", []string{"a8", "a9", "a10", "b1", "b2"}},
+		{"empty", "", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := expandNodeList(tt.raw); !slices.Equal(got, tt.want) {
+				t.Errorf("expandNodeList(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
 	}
 }
 

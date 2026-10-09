@@ -680,7 +680,9 @@ func expandNodeList(raw string) []string {
 					start, e1 := strconv.Atoi(first)
 					end, e2 := strconv.Atoi(last)
 					if e1 == nil && e2 == nil && end >= start {
-						padding := max(len(first), len(last))
+						// Slurm zero-pads a range to the width of its lower
+						// bound: a[8-10] is a8,a9,a10 but a[08-10] is a08..a10.
+						padding := len(first)
 						for n := start; n <= end; n++ {
 							result = append(result, prefix+fmt.Sprintf("%0*d", padding, n))
 						}

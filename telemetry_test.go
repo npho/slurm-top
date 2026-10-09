@@ -890,6 +890,8 @@ func TestParseGresIndicesByNode(t *testing.T) {
 		{"single node", "g004", []string{"gpu:h200:1(IDX:7)"}, map[string][]int{"g004": {7}}},
 		{"multi node keeps per-node indices", "g[003,014]", []string{"gpu:h200:4(IDX:1-2,5,7)", "gpu:h200:4(IDX:0-1,4-5)"},
 			map[string][]int{"g003": {1, 2, 5, 7}, "g014": {0, 1, 4, 5}}},
+		{"unpadded range crossing digit width", "a[9-10]", []string{"gpu:2(IDX:0-1)", "gpu:2(IDX:2-3)"},
+			map[string][]int{"a9": {0, 1}, "a10": {2, 3}}},
 		{"multi node count mismatch", "g[003,014]", []string{"gpu:h200:4(IDX:1-2,5,7)"}, nil},
 		{"no gpus", "n001", nil, nil},
 		{"no nodes", "", []string{"gpu:h200:1(IDX:0)"}, nil},
